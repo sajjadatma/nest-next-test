@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nest Dashboard</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section id="auth-view" class="auth-card">
+        <div class="brand"><span class="brand-mark">N</span><span>Nest Dashboard</span></div>
+        <p class="eyebrow">WELCOME</p>
+        <h1>Build with a clean foundation.</h1>
+        <p class="muted">Sign in to view your protected application dashboard.</p>
+        <form id="auth-form">
+          <label>Full name <input id="name" maxlength="80" placeholder="Ada Lovelace" /></label>
+          <label>Email <input id="email" type="email" required placeholder="you@example.com" /></label>
+          <label>Password <input id="password" type="password" required minlength="8" placeholder="At least 8 characters" /></label>
+          <button id="submit" type="submit">Create account</button>
+        </form>
+        <p id="form-message" class="message"></p>
+        <p class="switch">Already registered? <button id="mode-toggle" type="button">Sign in</button></p>
+      </section>
+
+      <section id="dashboard-view" hidden>
+        <nav><div class="brand"><span class="brand-mark">N</span><span>Nest Dashboard</span></div><div class="profile"><span id="profile-name"></span><button id="logout" type="button">Log out</button></div></nav>
+        <header><p class="eyebrow">OVERVIEW</p><h1>Welcome back, <span id="welcome-name">there</span>.</h1><p class="muted">Your application is connected and ready to grow.</p></header>
+        <div id="metrics" class="metrics"></div>
+        <section class="panel"><div class="panel-heading"><div><p class="eyebrow">USERS</p><h2>Recently joined</h2></div><span class="status"><i></i> System operational</span></div><div id="users" class="users"></div></section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
