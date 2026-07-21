@@ -28,5 +28,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Get the authenticated user' })
   @ApiOkResponse({ type: AuthUserDto })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token' })
-  me(@CurrentUser() user: { id: string; email: string }) { return user; }
+  async me(@CurrentUser() user: { id: string; email: string }) {
+    return this.auth.me(user.id);
+  }
 }

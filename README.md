@@ -22,6 +22,10 @@ With the server running, Swagger UI is available at `http://localhost:5050/api/d
 
 The Porsche Design System frontend lives in [`dashboard/`](./dashboard). Start the Nest API on port 5050, then run `npm run dev` from that directory and open `http://localhost:3000/login`.
 
+## Roles and permissions
+
+The application uses normalized RBAC tables (`Role`, `Permission`, `UserRole`, and `RolePermission`). All new accounts receive the `user` role with `dashboard:read`. To bootstrap an administrator, add a comma-separated list of existing account emails to `ADMIN_EMAILS` in `.env`, restart the API, and use the Role management section in the dashboard. Administrators have `roles:manage` and can update role assignments.
+
 ## API
 
 | Method | Path | Purpose |
