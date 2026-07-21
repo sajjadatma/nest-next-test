@@ -11,7 +11,10 @@ test('registers, updates a profile, signs out, and signs back in', async ({ page
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
 
-  await page.getByRole('button', { name: 'My account' }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Overview' })).toBeVisible();
+
+  await page.getByRole('link', { name: 'My account' }).click();
   await page.getByLabel('Full name').fill('Updated E2E Member');
   await page.getByRole('button', { name: 'Save profile' }).click();
   await expect(page.getByText('Profile updated.')).toBeVisible();

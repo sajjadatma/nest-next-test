@@ -4,12 +4,14 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RbacService } from '../rbac/rbac.service';
+import { AuditService } from '../audit/audit.service';
 
 describe('AuthService', () => {
   const jwt = { sign: vi.fn(() => 'signed-token') } as unknown as JwtService;
   const rbac = { defaultUserRole: vi.fn(), accessForUser: vi.fn() } as unknown as RbacService;
-  const prisma = { user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn() } } as unknown as PrismaService;
-  const service = new AuthService(prisma, jwt, rbac);
+  const audit = { record: vi.fn() } as unknown as AuditService;
+  const prisma = { user: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), findUniqueOrThrow: vi.fn() }, refreshToken: { create: vi.fn().mockResolvedValue({ id: 'refresh-1' }) } } as unknown as PrismaService;
+  const service = new AuthService(prisma, jwt, rbac, audit);
 
   beforeEach(() => vi.clearAllMocks());
 

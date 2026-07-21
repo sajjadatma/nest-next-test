@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { PrismaClient } from '../generated/postgres-client';
+import { PrismaClient } from '@prisma/client';
 
 describe('PostgreSQL database integration', () => {
   let container: StartedPostgreSqlContainer;
@@ -9,8 +9,7 @@ describe('PostgreSQL database integration', () => {
   beforeAll(async () => {
     container = await new PostgreSqlContainer('postgres:16-alpine').withStartupTimeout(30_000).start();
     const databaseUrl = container.getConnectionUri();
-    process.env.TEST_DATABASE_URL = databaseUrl;
-    execFileSync('npx', ['prisma', 'db', 'push', '--schema', 'test/prisma/schema.postgres.prisma', '--skip-generate'], { cwd: process.cwd(), env: process.env, stdio: 'inherit' });
+    execFileSync('npx', ['prisma', 'migrate', 'deploy'], { cwd: process.cwd(), env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: 'inherit' });
     prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
   });
 

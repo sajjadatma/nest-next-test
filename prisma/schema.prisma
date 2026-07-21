@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -12,10 +12,55 @@ model User {
   email        String   @unique
   name         String?
   passwordHash String
+  emailVerifiedAt DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   roles        UserRole[]
   permissions  UserPermission[]
+  refreshTokens RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  auditEvents AuditLog[] @relation("AuditActor")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  replacedById String? @unique
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacedBy RefreshToken? @relation("TokenRotation", fields: [replacedById], references: [id])
+  replacedToken RefreshToken? @relation("TokenRotation")
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  action    String
+  targetType String
+  targetId  String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  actor     User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
 }
 
 model Role {

@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { vi } from 'vitest';
 import { DashboardClient } from './dashboard-client';
 import { server } from '@/test/server';
+import { save } from '@/lib/api';
 
 const replace = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }) }));
@@ -18,21 +19,20 @@ const overview = { metrics: [{ label: 'Registered users', value: 1 }], recentUse
 describe('DashboardClient', () => {
   beforeEach(() => {
     replace.mockClear();
-    localStorage.setItem('drive-access-token', 'token-1');
+    save({ accessToken: 'token-1', user: { id: 'user-1', email: 'jane@example.com', name: 'Jane' } });
     server.use(
-      http.get('http://localhost:5050/api/auth/me', () => HttpResponse.json(account)),
-      http.get('http://localhost:5050/api/dashboard', () => HttpResponse.json(overview)),
+      http.get('http://127.0.0.1:5050/api/auth/me', () => HttpResponse.json(account)),
+      http.get('http://127.0.0.1:5050/api/dashboard', () => HttpResponse.json(overview)),
     );
   });
 
   it('shows loading state then saves profile changes', async () => {
     const user = userEvent.setup();
-    server.use(http.patch('http://localhost:5050/api/auth/me', () => HttpResponse.json({ ...account, name: 'Jane Updated' })));
-    render(<DashboardClient />);
+    server.use(http.patch('http://127.0.0.1:5050/api/auth/me', () => HttpResponse.json({ ...account, name: 'Jane Updated' })));
+    render(<DashboardClient view="account" />);
     expect(screen.getByText('Loading workspace…')).toBeInTheDocument();
     await screen.findByText('Drive workspace');
 
-    await user.click(screen.getByRole('button', { name: 'My account' }));
     const name = screen.getByLabelText('Full name');
     await user.clear(name);
     await user.type(name, 'Jane Updated');
@@ -42,11 +42,18 @@ describe('DashboardClient', () => {
   });
 
   it('shows an error when the profile request fails', async () => {
-    server.use(http.patch('http://localhost:5050/api/auth/me', () => HttpResponse.json({ message: 'Could not save profile' }, { status: 500 })));
-    render(<DashboardClient />);
+    server.use(http.patch('http://127.0.0.1:5050/api/auth/me', () => HttpResponse.json({ message: 'Could not save profile' }, { status: 500 })));
+    render(<DashboardClient view="account" />);
     await screen.findByText('Drive workspace');
-    fireEvent.click(screen.getByRole('button', { name: 'My account' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save profile' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not save profile');
+  });
+
+  it('renders navigation links for the dashboard routes', async () => {
+    render(<DashboardClient view="overview" />);
+    await screen.findByText('Drive workspace');
+
+    expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '/dashboard');
+    expect(screen.getByRole('link', { name: 'My account' })).toHaveAttribute('href', '/dashboard/account');
   });
 });

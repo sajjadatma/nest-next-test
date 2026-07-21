@@ -6,9 +6,10 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { RbacModule } from '../rbac/rbac.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
-  imports: [RbacModule, PassportModule, JwtModule.registerAsync({ inject: [ConfigService], useFactory: (config: ConfigService) => ({ secret: config.getOrThrow<string>('JWT_SECRET'), signOptions: { expiresIn: '1d' } }) })],
+  imports: [AuditModule, RbacModule, PassportModule, JwtModule.registerAsync({ inject: [ConfigService], useFactory: (config: ConfigService) => ({ secret: config.getOrThrow<string>('JWT_SECRET'), signOptions: { expiresIn: '15m' } }) })],
   controllers: [AuthController], providers: [AuthService, JwtStrategy], exports: [JwtModule],
 })
 export class AuthModule {}

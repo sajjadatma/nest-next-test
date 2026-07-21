@@ -46,4 +46,9 @@ describe('API integration', () => {
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ name: 'Updated User', roles: ['user'], permissions: ['dashboard:read'] });
   });
+
+  it('throttles repeated authentication attempts', async () => {
+    const attempts = await Promise.all(Array.from({ length: 6 }, () => request(app.getHttpServer()).post('/api/auth/login').send({ email: 'integration@example.com', password: 'wrong-password' })));
+    expect(attempts.some((response) => response.status === 429)).toBe(true);
+  });
 });

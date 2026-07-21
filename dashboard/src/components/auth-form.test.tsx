@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { vi } from 'vitest';
 import { AuthForm } from './auth-form';
 import { server } from '@/test/server';
+import { token } from '@/lib/api';
 
 const replace = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }) }));
@@ -17,7 +18,7 @@ describe('AuthForm', () => {
 
   it('submits registration and stores the received session', async () => {
     const user = userEvent.setup();
-    server.use(http.post('http://localhost:5050/api/auth/register', async ({ request }) => {
+    server.use(http.post('http://127.0.0.1:5050/api/auth/register', async ({ request }) => {
       expect(await request.json()).toMatchObject({ email: 'jane@example.com', password: 'password123', name: 'Jane Smith' });
       return HttpResponse.json({ accessToken: 'token-1', user: { id: '1', email: 'jane@example.com', name: 'Jane Smith' } });
     }));
@@ -29,11 +30,11 @@ describe('AuthForm', () => {
     await user.click(screen.getByRole('button', { name: 'Create account' }));
 
     await waitFor(() => expect(replace).toHaveBeenCalledWith('/dashboard'));
-    expect(localStorage.getItem('drive-access-token')).toBe('token-1');
+    expect(token()).toBe('token-1');
   });
 
   it('renders an API error without navigating away', async () => {
-    server.use(http.post('http://localhost:5050/api/auth/login', () => HttpResponse.json({ message: 'Invalid email or password' }, { status: 401 })));
+    server.use(http.post('http://127.0.0.1:5050/api/auth/login', () => HttpResponse.json({ message: 'Invalid email or password' }, { status: 401 })));
     render(<AuthForm mode="login" />);
     fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'jane@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });

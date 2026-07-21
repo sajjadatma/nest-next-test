@@ -23,8 +23,8 @@ The suite is layered so fast checks run before container and browser work. All c
 
 ## Isolation
 
-- Supertest integration tests migrate `prisma/test-api.db` from scratch and delete it after the run.
-- Browser tests migrate `prisma/e2e.db` before starting Nest on port `5051` and Next.js on port `3001`; these ports avoid the usual local development ports.
+- Supertest integration tests start a disposable PostgreSQL Testcontainer, apply the committed migration baseline, and stop it after the run.
+- Browser tests use the configured PostgreSQL database, apply migrations before starting Nest on port `5051` and Next.js on port `3001`; these ports avoid the usual local development ports.
 - PostgreSQL tests create and stop their own Testcontainer in hooks. The command disables Testcontainers' auxiliary reaper because explicit cleanup makes the suite faster and independent of pulling that additional image. No application database is reused.
 - Frontend tests mock only HTTP boundaries with MSW. Backend and database tests use real Prisma persistence.
 
