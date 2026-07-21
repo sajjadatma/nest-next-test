@@ -12,7 +12,7 @@ A TypeScript NestJS application with a modular API, Prisma persistence, JWT auth
 
 ## Run everything
 
-Run `npm run dev` from the repository root to start the Nest API at `http://localhost:5050` and the Next.js dashboard at `http://localhost:3000`. The project uses SQLite through Prisma, so the database is the local `prisma/dev.db` file and needs no separate server process.
+Run `npm run dev` from the repository root to start the Nest API at `http://localhost:5050` and the Next.js dashboard at `http://localhost:3000`. Both services are bound to `127.0.0.1` and are only reachable locally. The project uses SQLite through Prisma, so the database is the local `prisma/dev.db` file and needs no separate server process.
 
 ## API documentation
 

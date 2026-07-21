@@ -21,6 +21,6 @@ async function bootstrap() {
     useGlobalPrefix: true,
     customSiteTitle: 'Nest Dashboard API Docs',
   });
-  await app.listen(process.env.PORT ?? 5050);
+  await app.listen(process.env.PORT ?? 5050, '127.0.0.1');
 }
 bootstrap();
