@@ -35,6 +35,17 @@ export class RbacService implements OnModuleInit {
 
   async defaultUserRole() { await this.ensureDefaults(); return this.prisma.role.findUniqueOrThrow({ where: { key: RoleKey.User } }); }
 
+  async accessForUser(userId: string) {
+    const [assignments, directPermissions] = await Promise.all([
+      this.prisma.userRole.findMany({ where: { userId }, select: { role: { select: { key: true, permissions: { select: { permission: { select: { key: true } } } } } } } }),
+      this.prisma.userPermission.findMany({ where: { userId }, select: { permission: { select: { key: true } } } }),
+    ]);
+    return {
+      roles: assignments.map(({ role }) => role.key),
+      permissions: [...new Set([...assignments.flatMap(({ role }) => role.permissions.map(({ permission }) => permission.key)), ...directPermissions.map(({ permission }) => permission.key)])],
+    };
+  }
+
   private async upsertRole(key: string, name: string, description: string, permissionIds: string[]) {
     const role = await this.prisma.role.upsert({ where: { key }, update: { name, description }, create: { key, name, description } });
     await this.prisma.rolePermission.deleteMany({ where: { roleId: role.id } });

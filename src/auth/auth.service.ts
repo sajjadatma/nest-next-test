@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { RbacService } from '../rbac/rbac.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -25,8 +27,20 @@ export class AuthService {
   }
 
   async me(id: string) {
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id }, select: { id: true, email: true, name: true, roles: { select: { role: { select: { key: true, permissions: { select: { permission: { select: { key: true } } } } } } } } } });
-    return { id: user.id, email: user.email, name: user.name, roles: user.roles.map(({ role }) => role.key), permissions: [...new Set(user.roles.flatMap(({ role }) => role.permissions.map(({ permission }) => permission.key)))] };
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id }, select: { id: true, email: true, name: true } });
+    return { ...user, ...(await this.rbac.accessForUser(id)) };
+  }
+
+  async updateProfile(id: string, dto: UpdateProfileDto) {
+    await this.prisma.user.update({ where: { id }, data: { name: dto.name?.trim() || null } });
+    return this.me(id);
+  }
+
+  async changePassword(id: string, dto: ChangePasswordDto) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id }, select: { passwordHash: true } });
+    if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) throw new UnauthorizedException('Current password is incorrect');
+    await this.prisma.user.update({ where: { id }, data: { passwordHash: await bcrypt.hash(dto.newPassword, 12) } });
+    return { message: 'Password updated successfully' };
   }
 
   private session(user: { id: string; email: string; name: string | null }) {
