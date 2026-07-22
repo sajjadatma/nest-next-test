@@ -61,6 +61,10 @@ export class AuthService {
     return { ...user, ...(await this.rbac.accessForUser(id)) };
   }
 
+  loginAndSignupHistory(id: string) {
+    return this.audit.loginAndSignupHistory(id);
+  }
+
   async updateProfile(id: string, dto: UpdateProfileDto) {
     await this.prisma.user.update({ where: { id }, data: { name: dto.name?.trim() || null } });
     await this.audit.record('identity.profile_updated', 'user', id, id);

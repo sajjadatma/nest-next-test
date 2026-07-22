@@ -3,6 +3,7 @@ let accessToken: string | null = null;
 
 export type Session = { accessToken: string; user: { id: string; email: string; name: string | null } };
 export type Overview = { metrics: { label: string; value: string | number }[]; recentUsers: { id: string; email: string; name: string | null; createdAt: string }[] };
+export type LoginHistoryEvent = { action: 'identity.registered' | 'identity.logged_in'; createdAt: string };
 
 export const token = () => accessToken;
 export const clear = () => { accessToken = null; };

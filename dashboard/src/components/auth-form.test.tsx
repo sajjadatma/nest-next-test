@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { vi } from 'vitest';
 import { AuthForm } from './auth-form';
 import { server } from '@/test/server';
-import { token } from '@/lib/api';
+import { clear, token } from '@/lib/api';
 
 const replace = vi.fn();
 vi.mock('next/navigation', () => ({ useRouter: () => ({ replace }) }));
@@ -14,7 +14,11 @@ vi.mock('@porsche-design-system/components-react/ssr', () => ({
 }));
 
 describe('AuthForm', () => {
-  beforeEach(() => replace.mockClear());
+  beforeEach(() => {
+    replace.mockClear();
+    clear();
+    server.use(http.get('http://127.0.0.1:5050/api/auth/me', () => HttpResponse.json({ message: 'Unauthorized' }, { status: 401 })));
+  });
 
   it('submits registration and stores the received session', async () => {
     const user = userEvent.setup();
@@ -36,11 +40,19 @@ describe('AuthForm', () => {
   it('renders an API error without navigating away', async () => {
     server.use(http.post('http://127.0.0.1:5050/api/auth/login', () => HttpResponse.json({ message: 'Invalid email or password' }, { status: 401 })));
     render(<AuthForm mode="login" />);
+    await screen.findByLabelText('Email address');
     fireEvent.change(screen.getByLabelText('Email address'), { target: { value: 'jane@example.com' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'password123' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid email or password');
     expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('redirects an authenticated visitor away from the login route', async () => {
+    server.use(http.get('http://127.0.0.1:5050/api/auth/me', () => HttpResponse.json({ id: '1', email: 'jane@example.com' })));
+    render(<AuthForm mode="login" />);
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/dashboard'));
   });
 });

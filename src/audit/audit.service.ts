@@ -9,4 +9,13 @@ export class AuditService {
   record(action: string, targetType: string, targetId?: string, actorId?: string, metadata?: Record<string, unknown>) {
     return this.prisma.auditLog.create({ data: { action, targetType, targetId, actorId, metadata: metadata as Prisma.InputJsonValue | undefined } });
   }
+
+  loginAndSignupHistory(userId: string) {
+    return this.prisma.auditLog.findMany({
+      where: { actorId: userId, action: { in: ['identity.registered', 'identity.logged_in'] } },
+      select: { action: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  }
 }

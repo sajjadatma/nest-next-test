@@ -58,6 +58,10 @@ export class AuthController {
     return this.auth.me(user.id);
   }
 
+  @UseGuards(JwtAuthGuard) @Get('history')
+  @ApiBearerAuth() @ApiOperation({ summary: 'Get the authenticated user\'s login and signup history' })
+  loginAndSignupHistory(@CurrentUser() user: { id: string }) { return this.auth.loginAndSignupHistory(user.id); }
+
   @UseGuards(JwtAuthGuard) @Patch('me')
   @ApiBearerAuth() @ApiOperation({ summary: 'Update the authenticated user profile' }) @ApiOkResponse({ type: AuthUserDto })
   updateProfile(@CurrentUser() user: { id: string }, @Body() dto: UpdateProfileDto) { return this.auth.updateProfile(user.id, dto); }

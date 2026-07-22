@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { vi } from 'vitest';
-import { DashboardClient } from './dashboard-client';
+import { DashboardClient, formatHistoryTimestamp } from './dashboard-client';
 import { server } from '@/test/server';
 import { save } from '@/lib/api';
 
@@ -23,6 +23,7 @@ describe('DashboardClient', () => {
     server.use(
       http.get('http://127.0.0.1:5050/api/auth/me', () => HttpResponse.json(account)),
       http.get('http://127.0.0.1:5050/api/dashboard', () => HttpResponse.json(overview)),
+      http.get('http://127.0.0.1:5050/api/auth/history', () => HttpResponse.json([])),
     );
   });
 
@@ -55,5 +56,24 @@ describe('DashboardClient', () => {
 
     expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '/dashboard');
     expect(screen.getByRole('link', { name: 'My account' })).toHaveAttribute('href', '/dashboard/account');
+  });
+
+  it('shows the current account login and signup history', async () => {
+    server.use(http.get('http://127.0.0.1:5050/api/auth/history', () => HttpResponse.json([
+      { action: 'identity.logged_in', createdAt: '2026-07-22T00:00:00.000Z' },
+      { action: 'identity.registered', createdAt: '2026-07-21T00:00:00.000Z' },
+    ])));
+    render(<DashboardClient view="account" />);
+
+    expect(await screen.findByText('Login & signup history')).toBeInTheDocument();
+    expect(screen.getByText('Signed in')).toBeInTheDocument();
+    expect(screen.getByText('Account created')).toBeInTheDocument();
+  });
+
+  it('formats history timestamps with a relative time label', () => {
+    const now = new Date(2026, 6, 22, 3, 38, 24);
+    expect(formatHistoryTimestamp(new Date(2026, 6, 22, 3, 34, 24).toISOString(), now)).toMatch(/\| 4 minutes ago$/);
+    expect(formatHistoryTimestamp(new Date(2026, 6, 22, 2, 34, 24).toISOString(), now)).toMatch(/\| 1 hour ago$/);
+    expect(formatHistoryTimestamp(new Date(2026, 6, 21, 1, 34, 24).toISOString(), now)).toMatch(/\| Yesterday$/);
   });
 });
