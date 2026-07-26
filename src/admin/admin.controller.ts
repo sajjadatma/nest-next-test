@@ -8,6 +8,8 @@ import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import { AssignRolesDto } from './dto/assign-roles.dto';
 import { AssignPermissionsDto } from './dto/assign-permissions.dto';
 import { BulkAssignAccessDto } from './dto/bulk-assign-access.dto';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { AuditService } from '../audit/audit.service';
 
 const roleSelect = { key: true, name: true, permissions: { select: { permission: { select: { key: true, name: true } } } } } as const;
 
@@ -17,7 +19,7 @@ const roleSelect = { key: true, name: true, permissions: { select: { permission:
 @RequirePermissions(PermissionKey.RolesManage)
 @Controller('admin')
 export class AdminController {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private audit: AuditService) {}
 
   @Get('roles')
   @ApiOperation({ summary: 'List roles and their permissions' })
@@ -35,7 +37,7 @@ export class AdminController {
 
   @Put('users/access')
   @ApiOperation({ summary: 'Replace roles and direct permissions for multiple users' })
-  async assignAccess(@Body() dto: BulkAssignAccessDto) {
+  async assignAccess(@Body() dto: BulkAssignAccessDto, @CurrentUser() actor: { id: string }) {
     const userIds = dto.assignments.map(({ userId }) => userId);
     const [users, roles, permissions] = await Promise.all([
       this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true } }),
@@ -47,6 +49,7 @@ export class AdminController {
     const permissionIds = new Map(permissions.map((permission) => [permission.key, permission.id]));
     if (dto.assignments.some(({ roleKeys }) => roleKeys.some((key) => !roleIds.has(key)))) throw new NotFoundException('One or more role keys do not exist');
     if (dto.assignments.some(({ permissionKeys }) => permissionKeys.some((key) => !permissionIds.has(key)))) throw new NotFoundException('One or more permission keys do not exist');
+    const previous = await this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, roles: { select: { role: { select: { key: true } } } }, permissions: { select: { permission: { select: { key: true } } } } } });
     await this.prisma.$transaction(async (tx) => {
       for (const assignment of dto.assignments) {
         await tx.userRole.deleteMany({ where: { userId: assignment.userId } });
@@ -55,26 +58,29 @@ export class AdminController {
         if (assignment.permissionKeys.length) await tx.userPermission.createMany({ data: assignment.permissionKeys.map((key) => ({ userId: assignment.userId, permissionId: permissionIds.get(key)! })) });
       }
     });
+    await this.audit.record('access.bulk_updated', 'user_access', undefined, actor.id, { previous: previous.map((user) => ({ userId: user.id, roleKeys: user.roles.map(({ role }) => role.key), permissionKeys: user.permissions.map(({ permission }) => permission.key) })), next: dto.assignments });
     return { updated: dto.assignments.length };
   }
 
   @Put('users/:id/roles')
   @ApiOperation({ summary: 'Replace a user’s role assignments' })
-  async assignRoles(@Param('id') id: string, @Body() dto: AssignRolesDto) {
+  async assignRoles(@Param('id') id: string, @Body() dto: AssignRolesDto, @CurrentUser() actor: { id: string }) {
     const roles = await this.prisma.role.findMany({ where: { key: { in: dto.roleKeys } }, select: { id: true, key: true } });
     if (roles.length !== dto.roleKeys.length) throw new NotFoundException('One or more role keys do not exist');
     await this.prisma.userRole.deleteMany({ where: { userId: id } });
     await this.prisma.userRole.createMany({ data: roles.map((role) => ({ userId: id, roleId: role.id })) });
+    await this.audit.record('access.roles_updated', 'user', id, actor.id, { roleKeys: roles.map(({ key }) => key) });
     return { id, roles: roles.map(({ key }) => key) };
   }
 
   @Put('users/:id/permissions')
   @ApiOperation({ summary: 'Replace direct user permission grants' })
-  async assignPermissions(@Param('id') id: string, @Body() dto: AssignPermissionsDto) {
+  async assignPermissions(@Param('id') id: string, @Body() dto: AssignPermissionsDto, @CurrentUser() actor: { id: string }) {
     const permissions = await this.prisma.permission.findMany({ where: { key: { in: dto.permissionKeys } }, select: { id: true, key: true } });
     if (permissions.length !== dto.permissionKeys.length) throw new NotFoundException('One or more permission keys do not exist');
     await this.prisma.userPermission.deleteMany({ where: { userId: id } });
     if (permissions.length) await this.prisma.userPermission.createMany({ data: permissions.map((permission) => ({ userId: id, permissionId: permission.id })) });
+    await this.audit.record('access.permissions_updated', 'user', id, actor.id, { permissionKeys: permissions.map(({ key }) => key) });
     return { id, permissions: permissions.map(({ key }) => key) };
   }
 }

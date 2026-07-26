@@ -13,10 +13,12 @@ import { AdminModule } from './admin/admin.module';
 import { AppConfigModule } from './config/config.module';
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
+import { SystemLogsModule } from './system-logs/system-logs.module';
 
 @Module({
   imports: [
     AppConfigModule,
+    SystemLogsModule,
     AuditModule,
     LoggerModule.forRoot({ pinoHttp: { level: process.env.LOG_LEVEL ?? 'info', genReqId: (request, response) => { const requestId = request.headers['x-request-id']?.toString() ?? randomUUID(); response.setHeader('x-request-id', requestId); return requestId; }, redact: ['req.headers.authorization', 'req.headers.cookie'], customProps: (request) => ({ requestId: request.id }) } }),
     ThrottlerModule.forRoot([{ ttl: Number(process.env.RATE_LIMIT_TTL_MS ?? 60_000), limit: Number(process.env.RATE_LIMIT_MAX ?? 100) }]),

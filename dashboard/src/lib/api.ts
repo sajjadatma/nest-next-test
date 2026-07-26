@@ -4,6 +4,7 @@ let accessToken: string | null = null;
 export type Session = { accessToken: string; user: { id: string; email: string; name: string | null } };
 export type Overview = { metrics: { label: string; value: string | number }[]; recentUsers: { id: string; email: string; name: string | null; createdAt: string }[] };
 export type LoginHistoryEvent = { action: 'identity.registered' | 'identity.logged_in'; createdAt: string };
+export type SystemLogEvent = { id: string; severity: 'info' | 'warning' | 'error'; category: 'security' | 'access' | 'api' | 'health' | 'runtime'; message: string; requestId: string | null; path: string | null; statusCode: number | null; metadata: Record<string, unknown> | null; createdAt: string; actor: { id: string; email: string; name: string | null } | null };
 
 export const token = () => accessToken;
 export const clear = () => { accessToken = null; };

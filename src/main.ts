@@ -8,6 +8,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { RuntimeConfigService } from './config/runtime-config.service';
 import { HttpExceptionFilter } from './observability/http-exception.filter';
+import { SystemLogService } from './system-logs/system-log.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
@@ -20,7 +21,7 @@ async function bootstrap() {
   app.use(helmet());
   app.use(cookieParser());
   app.enableCors({ credentials: true, origin: (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => { if (!origin || config.frontendOrigins.includes(origin)) return callback(null, true); return callback(new Error('Origin is not allowed by CORS')); } });
-  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalFilters(new HttpExceptionFilter(app.get(SystemLogService)));
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
   );
@@ -37,5 +38,6 @@ async function bootstrap() {
   });
   await app.listen(config.port, config.host);
   app.get(Logger).log(`Backend is ready: http://${config.host}:${config.port}`, 'Bootstrap');
+  await app.get(SystemLogService).record({ severity: 'info', category: 'runtime', message: 'API started', metadata: { host: config.host, port: config.port, environment: config.nodeEnv } });
 }
 bootstrap();

@@ -20,6 +20,7 @@ model User {
   refreshTokens RefreshToken[]
   passwordResetTokens PasswordResetToken[]
   auditEvents AuditLog[] @relation("AuditActor")
+  systemEvents SystemLog[] @relation("SystemLogActor")
 }
 
 model RefreshToken {
@@ -61,6 +62,25 @@ model AuditLog {
 
   @@index([actorId, createdAt])
   @@index([action, createdAt])
+}
+
+model SystemLog {
+  id         String   @id @default(cuid())
+  severity   String
+  category   String
+  message    String
+  requestId  String?
+  path       String?
+  statusCode Int?
+  actorId    String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation("SystemLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([category, createdAt])
+  @@index([severity, createdAt])
+  @@index([actorId, createdAt])
 }
 
 model Role {

@@ -6,7 +6,7 @@ import { clear } from '@/lib/api';
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => {
   server.resetHandlers();
-  localStorage.clear();
+  if (typeof localStorage.clear === 'function') localStorage.clear();
   clear();
 });
 afterAll(() => server.close());
