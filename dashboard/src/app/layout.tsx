@@ -4,8 +4,8 @@ import { getComponentChunkLinks, getFontLinks, getIconLinks, getMetaTagsAndIconL
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Drive | Account dashboard",
-  description: "Porsche Design System dashboard backed by NestJS.",
+  title: "NEST | Thoughtful everyday goods",
+  description: "A small collection of considered everyday goods.",
 };
 
 export default function RootLayout({

@@ -14,6 +14,7 @@ import { AppConfigModule } from './config/config.module';
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
 import { SystemLogsModule } from './system-logs/system-logs.module';
+import { ShopModule } from './shop/shop.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { SystemLogsModule } from './system-logs/system-logs.module';
     DashboardModule,
     AdminModule,
     HealthModule,
+    ShopModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

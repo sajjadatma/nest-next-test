@@ -21,6 +21,76 @@ model User {
   passwordResetTokens PasswordResetToken[]
   auditEvents AuditLog[] @relation("AuditActor")
   systemEvents SystemLog[] @relation("SystemLogActor")
+  orders       Order[]
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Product {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  description String
+  priceMinor  Int
+  currency    String     @default("USD")
+  imageUrl    String?
+  isActive    Boolean    @default(true)
+  stockQty    Int        @default(0)
+  categoryId  String
+  category    Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  orderItems  OrderItem[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([categoryId, isActive])
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  number          String      @unique
+  email           String
+  customerId      String?
+  customer        User?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  status          OrderStatus @default(PENDING)
+  paymentMethod   String      @default("cash_on_delivery")
+  subtotalMinor   Int
+  shippingMinor   Int         @default(0)
+  totalMinor      Int
+  shippingAddress Json
+  items           OrderItem[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([email, createdAt])
+  @@index([status, createdAt])
+}
+
+model OrderItem {
+  id             String  @id @default(cuid())
+  orderId        String
+  productId      String
+  productName    String
+  unitPriceMinor Int
+  quantity       Int
+  order          Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product        Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  FULFILLED
+  CANCELLED
 }
 
 model RefreshToken {

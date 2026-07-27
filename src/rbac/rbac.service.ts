@@ -14,6 +14,7 @@ export class RbacService implements OnModuleInit {
       { key: PermissionKey.DashboardRead, name: 'Read dashboard', description: 'View dashboard data' },
       { key: PermissionKey.RolesManage, name: 'Manage roles', description: 'View users and assign roles' },
       { key: PermissionKey.SystemLogsRead, name: 'Read system logs', description: 'View sanitized system and security events' },
+      { key: PermissionKey.ShopManage, name: 'Manage shop', description: 'Manage catalogue, inventory, and orders' },
     ];
     for (const permission of definitions) await this.prisma.permission.upsert({ where: { key: permission.key }, update: { name: permission.name, description: permission.description }, create: permission });
     const permissions = await this.prisma.permission.findMany({ where: { key: { in: definitions.map(({ key }) => key) } } });
