@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEmail, IsInt, IsNotEmpty, IsString, Max, Min, ValidateNested } from 'class-validator';
+import { ArrayMinSize, IsArray, IsEmail, IsInt, IsNotEmpty, IsString, IsUUID, Matches, Max, Min, ValidateNested } from 'class-validator';
 
 export class OrderLineDto {
   @IsString() @IsNotEmpty() productId!: string;
@@ -16,6 +16,9 @@ export class ShippingAddressDto {
 
 export class CreateOrderDto {
   @IsEmail() email!: string;
-  @ValidateNested({ each: true }) @Type(() => OrderLineDto) items!: OrderLineDto[];
+  @Matches(/^\+?[0-9 ()-]{7,20}$/) phone!: string;
+  @IsUUID() idempotencyKey!: string;
+  @IsUUID() confirmationToken!: string;
+  @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => OrderLineDto) items!: OrderLineDto[];
   @ValidateNested() @Type(() => ShippingAddressDto) shippingAddress!: ShippingAddressDto;
 }

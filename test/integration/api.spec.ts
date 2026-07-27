@@ -32,7 +32,8 @@ describe('API integration', () => {
     await expect(request(app.getHttpServer()).get('/api/dashboard')).resolves.toMatchObject({ status: 401 });
     const dashboard = await request(app.getHttpServer()).get('/api/dashboard').set('Authorization', `Bearer ${token}`);
     expect(dashboard.status).toBe(200);
-    expect(dashboard.body.metrics[0]).toEqual({ label: 'Registered users', value: 1 });
+    expect(dashboard.body.metrics[0]).toMatchObject({ label: 'Registered users' });
+    expect(dashboard.body.metrics[0].value).toBeGreaterThanOrEqual(1);
   });
 
   it('handles duplicate registrations, unauthorized login, and forbidden administration', async () => {

@@ -16,6 +16,7 @@ async function refreshAccessToken() {
   save(await response.json() as Session);
   return true;
 }
+export const restoreSession = refreshAccessToken;
 
 export async function api<T>(path: string, options: RequestInit = {}, retried = false): Promise<T> {
   const response = await fetch(`${base}${path}`, { ...options, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(token() ? { Authorization: `Bearer ${token()}` } : {}), ...options.headers } });

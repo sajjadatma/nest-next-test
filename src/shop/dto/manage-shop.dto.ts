@@ -5,6 +5,12 @@ import { OrderStatus } from '@prisma/client';
 export class SaveCategoryDto {
   @IsString() @MaxLength(80) name!: string;
   @IsString() @MaxLength(80) slug!: string;
+  @IsOptional() @IsString() parentId?: string | null;
+}
+
+export class MoveCategoryDto {
+  @IsOptional() @IsString() parentId?: string | null;
+  @Type(() => Number) @IsInt() @Min(0) position!: number;
 }
 
 export class SaveProductDto {
@@ -19,3 +25,14 @@ export class SaveProductDto {
 }
 
 export class UpdateOrderStatusDto { @IsEnum(OrderStatus) status!: OrderStatus; }
+
+export class ManageOrderStatusDto {
+  @IsEnum(OrderStatus) status!: OrderStatus;
+  @IsOptional() @IsString() @MaxLength(300) reason?: string;
+}
+
+export class AdminOrdersQueryDto {
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page = 1;
+  @IsOptional() @IsString() @MaxLength(120) q = '';
+  @IsOptional() @IsEnum(OrderStatus) status?: OrderStatus;
+}

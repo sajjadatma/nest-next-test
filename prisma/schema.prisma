@@ -28,9 +28,15 @@ model Category {
   id        String    @id @default(cuid())
   name      String
   slug      String    @unique
+  parentId  String?
+  parent    Category? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children  Category[] @relation("CategoryTree")
+  position  Int       @default(0)
   products  Product[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  @@index([parentId, position])
 }
 
 model Product {
@@ -56,6 +62,7 @@ model Order {
   id              String      @id @default(cuid())
   number          String      @unique
   email           String
+  phone           String
   customerId      String?
   customer        User?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
   status          OrderStatus @default(PENDING)
@@ -64,6 +71,12 @@ model Order {
   shippingMinor   Int         @default(0)
   totalMinor      Int
   shippingAddress Json
+  idempotencyKey  String      @unique
+  confirmationTokenHash String @unique
+  confirmationEmailStatus NotificationStatus @default(PENDING)
+  confirmationEmailId String?
+  cancellationReason String?
+  cancelledAt     DateTime?
   items           OrderItem[]
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
@@ -91,6 +104,13 @@ enum OrderStatus {
   CONFIRMED
   FULFILLED
   CANCELLED
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
 }
 
 model RefreshToken {

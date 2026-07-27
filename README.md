@@ -2,6 +2,8 @@
 
 A TypeScript NestJS application with a modular API, Prisma persistence, JWT authentication, and a protected browser dashboard.
 
+The project also includes a cash-on-delivery shop at `/shop` and protected commerce operations at `/dashboard/shop`. Checkout uses atomic inventory reservations, idempotency keys, durable confirmation links, customer order history, and audited staff order transitions.
+
 ## Quick start
 
 1. Install dependencies: `npm install`
@@ -16,6 +18,8 @@ A TypeScript NestJS application with a modular API, Prisma persistence, JWT auth
 Run `npm run dev` from the repository root to start the Nest API at `http://localhost:5050` and the Next.js dashboard at `http://localhost:3000`. Both services are bound to `127.0.0.1` and are only reachable locally. PostgreSQL runs in Docker on `127.0.0.1:5433`; start it with `npm run db:up`.
 
 ## API documentation
+
+Production order emails require `RESEND_API_KEY`, `ORDER_EMAIL_FROM`, and `SHOP_PUBLIC_URL`. Verify the sender domain in Resend and use a verified sender such as `NEST <orders@example.com>`. Development can omit these values; orders still receive a durable confirmation page and are marked with `SKIPPED` email status.
 
 With the server running, Swagger UI is available at `http://localhost:5050/api/docs` and the OpenAPI JSON document at `http://localhost:5050/api/docs-json`.
 
