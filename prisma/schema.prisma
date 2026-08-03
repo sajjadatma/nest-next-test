@@ -22,6 +22,12 @@ model User {
   auditEvents AuditLog[] @relation("AuditActor")
   systemEvents SystemLog[] @relation("SystemLogActor")
   orders       Order[]
+  favorites    Favorite[]
+  productComments ProductComment[]
+  moderatedComments ProductComment[] @relation("CommentModerator")
+  inventoryMovements InventoryMovement[]
+  orderNotes       OrderNote[]
+  orderStatusEvents OrderStatusEvent[]
 }
 
 model Category {
@@ -47,15 +53,73 @@ model Product {
   priceMinor  Int
   currency    String     @default("USD")
   imageUrl    String?
+  material    String?
+  dimensions  String?
+  care        String?
+  featuredRank Int?
   isActive    Boolean    @default(true)
   stockQty    Int        @default(0)
+  lowStockThreshold Int @default(5)
   categoryId  String
   category    Category   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   orderItems  OrderItem[]
+  images      ProductImage[]
+  favorites   Favorite[]
+  comments    ProductComment[]
+  inventoryMovements InventoryMovement[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
   @@index([categoryId, isActive])
+}
+
+model ProductImage {
+  id        String   @id @default(cuid())
+  productId String
+  url       String
+  alt       String
+  position  Int      @default(0)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, position])
+}
+
+model Favorite {
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([userId, productId])
+  @@index([productId])
+}
+
+enum CommentStatus {
+  PENDING
+  PUBLISHED
+  HIDDEN
+}
+
+model ProductComment {
+  id        String        @id @default(cuid())
+  productId String
+  authorId  String
+  body      String
+  rating    Int?
+  status    CommentStatus @default(PUBLISHED)
+  moderationReason String?
+  moderatedAt DateTime?
+  moderatedById String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  product   Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  author    User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  moderatedBy User?       @relation("CommentModerator", fields: [moderatedById], references: [id], onDelete: SetNull)
+
+  @@index([productId, status, createdAt])
+  @@index([authorId])
+  @@index([status, createdAt])
 }
 
 model Order {
@@ -69,7 +133,13 @@ model Order {
   paymentMethod   String      @default("cash_on_delivery")
   subtotalMinor   Int
   shippingMinor   Int         @default(0)
+  shippingMethod  String      @default("standard")
+  shippingLabel   String      @default("Standard delivery")
+  shippingEta     String      @default("3–5 business days")
   totalMinor      Int
+  discountMinor   Int         @default(0)
+  promotionCode   String?
+  promotionId     String?
   shippingAddress Json
   idempotencyKey  String      @unique
   confirmationTokenHash String @unique
@@ -78,11 +148,18 @@ model Order {
   cancellationReason String?
   cancelledAt     DateTime?
   items           OrderItem[]
+  promotion       Promotion?  @relation(fields: [promotionId], references: [id], onDelete: SetNull)
+  notes           OrderNote[]
+  shipments       Shipment[]
+  statusEvents    OrderStatusEvent[]
+  inventoryMovements InventoryMovement[]
+  promotionRedemptions PromotionRedemption[]
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
   @@index([email, createdAt])
   @@index([status, createdAt])
+  @@index([promotionId])
 }
 
 model OrderItem {
@@ -102,8 +179,142 @@ model OrderItem {
 enum OrderStatus {
   PENDING
   CONFIRMED
+  PACKING
+  SHIPPED
+  DELIVERED
   FULFILLED
   CANCELLED
+}
+
+enum ShipmentStatus {
+  PENDING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum InventoryMovementReason {
+  OPENING_BALANCE
+  ORDER_RESERVATION
+  ORDER_CANCELLATION
+  ADJUSTMENT
+  RETURN
+}
+
+enum PromotionType {
+  FIXED
+  PERCENTAGE
+}
+
+model ShippingMethod {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  label       String
+  description String?
+  eta         String
+  priceMinor  Int      @default(0)
+  isActive    Boolean  @default(true)
+  position    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isActive, position])
+}
+
+model InventoryMovement {
+  id          String                  @id @default(cuid())
+  productId   String
+  orderId     String?
+  actorId     String?
+  reason      InventoryMovementReason
+  quantityDelta Int
+  stockAfter  Int
+  note        String?
+  createdAt   DateTime                @default(now())
+  product     Product                 @relation(fields: [productId], references: [id], onDelete: Restrict)
+  order       Order?                  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  actor       User?                   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([productId, createdAt])
+  @@index([orderId])
+  @@index([actorId, createdAt])
+}
+
+model OrderNote {
+  id          String   @id @default(cuid())
+  orderId     String
+  authorId    String
+  body        String
+  isCustomerVisible Boolean @default(false)
+  createdAt   DateTime @default(now())
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  author      User     @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
+}
+
+model OrderStatusEvent {
+  id          String      @id @default(cuid())
+  orderId     String
+  actorId     String?
+  previousStatus OrderStatus?
+  status      OrderStatus
+  reason      String?
+  createdAt   DateTime    @default(now())
+  order       Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor       User?       @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+}
+
+model Shipment {
+  id          String         @id @default(cuid())
+  orderId     String
+  carrier     String?
+  service     String?
+  trackingNumber String?
+  trackingUrl String?
+  status      ShipmentStatus @default(PENDING)
+  packedAt    DateTime?
+  shippedAt   DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([trackingNumber])
+}
+
+model Promotion {
+  id            String        @id @default(cuid())
+  code          String        @unique
+  type          PromotionType
+  value         Int
+  minimumSubtotalMinor Int? 
+  usageLimit    Int?
+  usedCount     Int           @default(0)
+  startsAt      DateTime?
+  endsAt        DateTime?
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  orders        Order[]
+  redemptions   PromotionRedemption[]
+
+  @@index([isActive, startsAt, endsAt])
+}
+
+model PromotionRedemption {
+  id          String    @id @default(cuid())
+  promotionId String
+  orderId     String    @unique
+  amountMinor Int
+  createdAt   DateTime  @default(now())
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Restrict)
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([promotionId, createdAt])
 }
 
 enum NotificationStatus {

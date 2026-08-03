@@ -8,6 +8,10 @@ type Order = {
   number: string;
   status: string;
   totalMinor: number;
+  subtotalMinor: number;
+  shippingMinor: number;
+  shippingLabel: string;
+  shippingEta: string;
   phone: string;
   email: string;
   createdAt: string;
@@ -90,6 +94,10 @@ export function OrderConfirmation({ token }: { token: string }) {
               {order.shippingAddress.country}
             </dd>
           </div>
+          <div>
+            <dt>Delivery method</dt>
+            <dd>{order.shippingLabel}<br />{order.shippingEta}</dd>
+          </div>
         </dl>
         <div className="confirmation-lines">
           {order.items.map((item) => (
@@ -100,6 +108,14 @@ export function OrderConfirmation({ token }: { token: string }) {
               <strong>{money(item.unitPriceMinor * item.quantity)}</strong>
             </div>
           ))}
+          <div>
+            <span>Subtotal</span>
+            <strong>{money(order.subtotalMinor)}</strong>
+          </div>
+          <div>
+            <span>{order.shippingLabel}</span>
+            <strong>{order.shippingMinor ? money(order.shippingMinor) : "Included"}</strong>
+          </div>
           <div>
             <span>Total</span>
             <strong>{money(order.totalMinor)}</strong>

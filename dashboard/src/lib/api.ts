@@ -13,7 +13,12 @@ export const save = (session: Session) => { accessToken = session.accessToken; }
 async function refreshAccessToken() {
   const response = await fetch(`${base}/auth/refresh`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' } });
   if (!response.ok) return false;
-  save(await response.json() as Session);
+  const session = await response.json().catch(() => null) as Session | null;
+  // A visitor without a refresh cookie receives a successful, informational
+  // response. It is not an authenticated session and must not trigger a
+  // follow-up request to a protected endpoint.
+  if (!session?.accessToken) return false;
+  save(session);
   return true;
 }
 export const restoreSession = refreshAccessToken;

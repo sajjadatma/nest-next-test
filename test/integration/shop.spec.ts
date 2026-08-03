@@ -31,8 +31,26 @@ describe('Shop integration', () => {
 
   const checkout = (overrides: Record<string, unknown> = {}) => ({
     email: 'buyer@example.com', phone: '+1 555 010 1200', idempotencyKey: randomUUID(), confirmationToken: randomUUID(),
-    items: [{ productId, quantity: 1 }], shippingAddress: { fullName: 'Test Buyer', line1: '1 Market Street', city: 'Test City', postalCode: '10001', country: 'US' }, ...overrides,
+    items: [{ productId, quantity: 1 }], shippingMethod: 'standard', shippingAddress: { fullName: 'Test Buyer', line1: '1 Market Street', city: 'Test City', postalCode: '10001', country: 'US' }, ...overrides,
   });
+
+  async function registerScopedUser(permissionKeys: string[]) {
+    const registration = await request(app.getHttpServer()).post('/api/auth/register').send({ email: `staff-${randomUUID()}@example.com`, password: 'password123', name: 'Shop Staff' });
+    expect(registration.status).toBe(201);
+    const permissions = await prisma.permission.findMany({ where: { key: { in: permissionKeys } } });
+    expect(permissions).toHaveLength(permissionKeys.length);
+    await prisma.userPermission.createMany({ data: permissions.map((permission) => ({ userId: registration.body.user.id, permissionId: permission.id })) });
+    return { userId: registration.body.user.id as string, authorization: { Authorization: `Bearer ${registration.body.accessToken}` } };
+  }
+
+  async function createOrderForOperations(overrides: Record<string, unknown> = {}) {
+    const category = await prisma.category.create({ data: { name: `Operations ${randomUUID()}`, slug: `operations-${randomUUID()}` } });
+    const product = await prisma.product.create({ data: { name: 'Operations product', slug: `operations-product-${randomUUID()}`, description: 'For management integration coverage', priceMinor: 2500, stockQty: 10, categoryId: category.id, ...overrides } });
+    const payload = checkout({ items: [{ productId: product.id, quantity: 1 }] });
+    const response = await request(app.getHttpServer()).post('/api/shop/orders').send(payload);
+    expect(response.status).toBe(201);
+    return { product, order: response.body as { id: string; number: string } };
+  }
 
   it('creates an idempotent order with durable confirmation', async () => {
     const payload = checkout();
@@ -84,6 +102,30 @@ describe('Shop integration', () => {
     expect(response.status).toBe(400);
   });
 
+  it('returns product details and calculates delivery on the server', async () => {
+    const product = await prisma.product.findUniqueOrThrow({ where: { id: productId } });
+    const details = await request(app.getHttpServer()).get(`/api/shop/products/${product.slug}`);
+    expect(details.status).toBe(200);
+    expect(details.body).toMatchObject({ id: productId, isFavorite: false, commentCount: 0 });
+    const options = await request(app.getHttpServer()).get('/api/shop/shipping-options');
+    expect(options.body.map((option: { id: string }) => option.id)).toEqual(['standard', 'express']);
+    await prisma.product.update({ where: { id: productId }, data: { stockQty: 2 } });
+    const order = await request(app.getHttpServer()).post('/api/shop/orders').send(checkout({ shippingMethod: 'express' }));
+    expect(order.status).toBe(201);
+    expect(order.body).toMatchObject({ subtotalMinor: 2500, shippingMinor: 1200, totalMinor: 3700, shippingMethod: 'express' });
+  });
+
+  it('persists favorites and authenticated product comments', async () => {
+    const authorization = { Authorization: `Bearer ${token}` };
+    expect((await request(app.getHttpServer()).put(`/api/shop/products/${productId}/favorite`).set(authorization)).status).toBe(200);
+    expect((await request(app.getHttpServer()).get('/api/shop/favorites').set(authorization)).body.productIds).toContain(productId);
+    const created = await request(app.getHttpServer()).post(`/api/shop/products/${productId}/comments`).set(authorization).send({ body: 'Thoughtfully made and useful.', rating: 5 });
+    expect(created.status).toBe(201);
+    expect((await request(app.getHttpServer()).get(`/api/shop/products/${productId}/comments`)).body).toEqual(expect.arrayContaining([expect.objectContaining({ id: created.body.id, rating: 5 })]));
+    expect((await request(app.getHttpServer()).delete(`/api/shop/comments/${created.body.id}`).set(authorization)).status).toBe(200);
+    expect((await request(app.getHttpServer()).delete(`/api/shop/products/${productId}/favorite`).set(authorization)).status).toBe(200);
+  });
+
   it('edits, nests, reorders, and safely removes categories', async () => {
     const permission = await prisma.permission.findUniqueOrThrow({ where: { key: 'shop:manage' } });
     await prisma.userPermission.upsert({ where: { userId_permissionId: { userId, permissionId: permission.id } }, update: {}, create: { userId, permissionId: permission.id } });
@@ -113,5 +155,53 @@ describe('Shop integration', () => {
     const productCategory = (await prisma.product.findUniqueOrThrow({ where: { id: productId }, select: { categoryId: true } })).categoryId;
     const protectedRemoval = await request(app.getHttpServer()).delete(`/api/shop/admin/categories/${productCategory}`).set(authorization);
     expect(protectedRemoval.status).toBe(409);
+  });
+
+  it('allows an order-fulfilment specialist to persist notes and shipments without shop:manage', async () => {
+    const { order } = await createOrderForOperations();
+    const staff = await registerScopedUser(['shop:orders:fulfill']);
+
+    expect((await request(app.getHttpServer()).get('/api/shop/admin/overview').set(staff.authorization)).status).toBe(403);
+
+    const note = await request(app.getHttpServer()).post(`/api/shop/admin/orders/${order.id}/notes`).set(staff.authorization).send({ body: 'Packed with care.', isCustomerVisible: false });
+    expect(note.status).toBe(201);
+    expect(note.body).toMatchObject({ orderId: order.id, body: 'Packed with care.', isCustomerVisible: false, authorId: staff.userId });
+
+    const shipment = await request(app.getHttpServer()).post(`/api/shop/admin/orders/${order.id}/shipments`).set(staff.authorization).send({ carrier: 'Test carrier', service: 'Ground', trackingNumber: 'TRACK-123' });
+    expect(shipment.status).toBe(201);
+    expect(await prisma.shipment.findUnique({ where: { id: shipment.body.id } })).toMatchObject({ orderId: order.id, carrier: 'Test carrier', trackingNumber: 'TRACK-123' });
+  });
+
+  it('enforces the reports API contract for an analytics-only staff member', async () => {
+    const { order } = await createOrderForOperations();
+    await prisma.order.update({ where: { id: order.id }, data: { status: 'CONFIRMED' } });
+    const staff = await registerScopedUser(['shop:analytics:read']);
+
+    const response = await request(app.getHttpServer()).get('/api/shop/admin/reports').set(staff.authorization).query({ from: '2020-01-01T00:00:00.000Z', to: '2030-01-01T00:00:00.000Z' });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ range: { from: '2020-01-01T00:00:00.000Z', to: '2030-01-01T00:00:00.000Z' }, orders: expect.any(Number), revenueMinor: expect.any(Number), shippingRevenueMinor: expect.any(Number), discountsMinor: expect.any(Number) });
+    expect(response.body.topProducts).toEqual(expect.arrayContaining([expect.objectContaining({ productName: 'Operations product', _sum: expect.objectContaining({ quantity: 1 }) })]));
+  });
+
+  it('redeems an active promotion once and persists the server-calculated discount', async () => {
+    const category = await prisma.category.create({ data: { name: `Promotion ${randomUUID()}`, slug: `promotion-${randomUUID()}` } });
+    const product = await prisma.product.create({ data: { name: 'Promotion product', slug: `promotion-product-${randomUUID()}`, description: 'For promotion coverage', priceMinor: 2500, stockQty: 2, categoryId: category.id } });
+    const promotion = await prisma.promotion.create({ data: { code: `SAVE${randomUUID().slice(0, 6)}`.toUpperCase(), type: 'PERCENTAGE', value: 10, usageLimit: 1 } });
+    const order = await request(app.getHttpServer()).post('/api/shop/orders').send(checkout({ items: [{ productId: product.id, quantity: 1 }], promotionCode: promotion.code }));
+    expect(order.status).toBe(201);
+    expect(order.body).toMatchObject({ subtotalMinor: 2500, discountMinor: 250, totalMinor: 2250, promotionCode: promotion.code });
+    expect(await prisma.promotion.findUnique({ where: { id: promotion.id }, select: { usedCount: true } })).toEqual({ usedCount: 1 });
+  });
+
+  it('uses each product low-stock threshold in analytics instead of a global cutoff', async () => {
+    const category = await prisma.category.create({ data: { name: `Threshold ${randomUUID()}`, slug: `threshold-${randomUUID()}` } });
+    const aboveThreshold = await prisma.product.create({ data: { name: 'Above own threshold', slug: `above-threshold-${randomUUID()}`, description: 'Should not be low stock', priceMinor: 1000, stockQty: 3, lowStockThreshold: 2, categoryId: category.id } });
+    const belowThreshold = await prisma.product.create({ data: { name: 'Below own threshold', slug: `below-threshold-${randomUUID()}`, description: 'Should be low stock', priceMinor: 1000, stockQty: 2, lowStockThreshold: 2, categoryId: category.id } });
+    const staff = await registerScopedUser(['shop:analytics:read']);
+
+    const response = await request(app.getHttpServer()).get('/api/shop/admin/reports').set(staff.authorization);
+    expect(response.status).toBe(200);
+    expect(response.body.lowStock.map((product: { id: string }) => product.id)).toContain(belowThreshold.id);
+    expect(response.body.lowStock.map((product: { id: string }) => product.id)).not.toContain(aboveThreshold.id);
   });
 });

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { PButton, PWordmark } from "@porsche-design-system/components-react/ssr";
-import { api, clear, save, Session } from "@/lib/api";
+import { api, clear, restoreSession, save, Session, token } from "@/lib/api";
 import { Toast } from "@/components/toast";
 
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
@@ -17,10 +17,17 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   useEffect(() => {
     if (register) return;
     let mounted = true;
-    api("/auth/me")
-      .then(() => router.replace("/dashboard"))
-      .catch(() => clear())
-      .finally(() => { if (mounted) setCheckingSession(false); });
+    void (async () => {
+      try {
+        if (token() || await restoreSession()) await api("/auth/me");
+        else clear();
+        if (mounted && token()) router.replace("/dashboard");
+      } catch {
+        clear();
+      } finally {
+        if (mounted) setCheckingSession(false);
+      }
+    })();
     return () => { mounted = false; };
   }, [register, router]);
 

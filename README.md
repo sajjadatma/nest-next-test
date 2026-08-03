@@ -17,6 +17,8 @@ The project also includes a cash-on-delivery shop at `/shop` and protected comme
 
 Run `npm run dev` from the repository root to start the Nest API at `http://localhost:5050` and the Next.js dashboard at `http://localhost:3000`. Both services are bound to `127.0.0.1` and are only reachable locally. PostgreSQL runs in Docker on `127.0.0.1:5433`; start it with `npm run db:up`.
 
+`npm run dev` always runs the complete development preflight first: Docker/PostgreSQL health, Prisma migrations, lint, type checks, backend and frontend unit tests, and integration tests. If any check fails, the servers are not started. See [Development run policy](./DEV_WORKFLOW.md) for the full flow and troubleshooting guidance. Run `npm run dev:check` when you want to validate without starting the servers.
+
 ## API documentation
 
 Production order emails require `RESEND_API_KEY`, `ORDER_EMAIL_FROM`, and `SHOP_PUBLIC_URL`. Verify the sender domain in Resend and use a verified sender such as `NEST <orders@example.com>`. Development can omit these values; orders still receive a durable confirmation page and are marked with `SKIPPED` email status.

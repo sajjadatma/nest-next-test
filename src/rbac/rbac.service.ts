@@ -15,6 +15,15 @@ export class RbacService implements OnModuleInit {
       { key: PermissionKey.RolesManage, name: 'Manage roles', description: 'View users and assign roles' },
       { key: PermissionKey.SystemLogsRead, name: 'Read system logs', description: 'View sanitized system and security events' },
       { key: PermissionKey.ShopManage, name: 'Manage shop', description: 'Manage catalogue, inventory, and orders' },
+      { key: PermissionKey.ShopCatalogManage, name: 'Manage shop catalogue', description: 'Create and edit shop products and categories' },
+      { key: PermissionKey.ShopInventoryManage, name: 'Manage shop inventory', description: 'Adjust inventory and review inventory movements' },
+      { key: PermissionKey.ShopOrdersRead, name: 'Read shop orders', description: 'View orders and customer fulfilment data' },
+      { key: PermissionKey.ShopOrdersFulfill, name: 'Fulfil shop orders', description: 'Update order, shipment, and note operations' },
+      { key: PermissionKey.ShopShippingManage, name: 'Manage shipping methods', description: 'Configure checkout shipping methods' },
+      { key: PermissionKey.ShopPromotionsManage, name: 'Manage promotions', description: 'Create and edit promotion codes' },
+      { key: PermissionKey.ShopCommentsModerate, name: 'Moderate shop comments', description: 'Review and moderate product comments' },
+      { key: PermissionKey.ShopAnalyticsRead, name: 'Read shop analytics', description: 'View shop operational analytics' },
+      { key: PermissionKey.ShopAuditRead, name: 'Read shop audit feed', description: 'View shop change history' },
     ];
     for (const permission of definitions) await this.prisma.permission.upsert({ where: { key: permission.key }, update: { name: permission.name, description: permission.description }, create: permission });
     const permissions = await this.prisma.permission.findMany({ where: { key: { in: definitions.map(({ key }) => key) } } });

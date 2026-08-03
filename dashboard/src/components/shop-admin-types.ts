@@ -1,4 +1,14 @@
-export type ShopSection = "overview" | "products" | "categories" | "orders";
+export type ShopSection =
+  | "overview"
+  | "products"
+  | "inventory"
+  | "categories"
+  | "orders"
+  | "shipping"
+  | "promotions"
+  | "moderation"
+  | "reports"
+  | "audit";
 
 export type Category = {
   id: string;
@@ -16,8 +26,14 @@ export type Product = {
   description: string;
   priceMinor: number;
   stockQty: number;
+  lowStockThreshold: number;
   isActive: boolean;
   imageUrl: string | null;
+  material: string | null;
+  dimensions: string | null;
+  care: string | null;
+  featuredRank: number | null;
+  images: { id: string; url: string; alt: string; position: number }[];
   categoryId: string;
   category: Category;
 };
@@ -31,6 +47,11 @@ export type Order = {
   phone: string;
   status: OrderStatus;
   totalMinor: number;
+  subtotalMinor: number;
+  shippingMinor: number;
+  shippingMethod: string;
+  shippingLabel: string;
+  shippingEta: string;
   createdAt: string;
   cancellationReason: string | null;
   shippingAddress: {
@@ -70,6 +91,11 @@ export type ProductDraft = {
   stockQty: string;
   categoryId: string;
   imageUrl: string;
+  material: string;
+  dimensions: string;
+  care: string;
+  featuredRank: string;
+  galleryUrls: string;
   isActive: boolean;
 };
 
@@ -81,6 +107,11 @@ export const emptyProduct: ProductDraft = {
   stockQty: "0",
   categoryId: "",
   imageUrl: "",
+  material: "",
+  dimensions: "",
+  care: "",
+  featuredRank: "",
+  galleryUrls: "",
   isActive: true,
 };
 

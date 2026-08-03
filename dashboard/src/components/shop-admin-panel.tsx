@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { ShopAdminNavigation } from "@/components/shop-admin-navigation";
 import { ShopOverviewPanel } from "@/components/shop-overview-panel";
 import { CategoryManager } from "@/components/category-manager";
+import { ShopManagementPanels } from "@/components/shop-management-panels";
 import {
   emptyProduct,
   money,
@@ -17,7 +18,7 @@ import {
   statuses,
 } from "@/components/shop-admin-types";
 
-export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection }) {
+export function ShopAdminPanel({ section = "overview", permissions }: { section?: ShopSection; permissions: string[] }) {
   const [data, setData] = useState<ShopData | null>(null);
   const [orders, setOrders] = useState<OrderPage | null>(null);
   const [product, setProduct] = useState(emptyProduct);
@@ -26,9 +27,20 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
   const [orderQuery, setOrderQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [orderStatus, setOrderStatus] = useState("");
+  const [orderNote, setOrderNote] = useState("");
+  const [shipment, setShipment] = useState({ carrier: "", trackingNumber: "", service: "" });
   const [page, setPage] = useState(1);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const can = (permission?: string) => permissions.includes("shop:manage") || Boolean(permission && permissions.includes(permission));
+  const sectionPermission: Partial<Record<ShopSection, string>> = {
+    products: "shop:catalog:manage", categories: "shop:catalog:manage", inventory: "shop:inventory:manage",
+    orders: "shop:orders:read", shipping: "shop:shipping:manage", promotions: "shop:promotions:manage",
+    moderation: "shop:comments:moderate", reports: "shop:analytics:read", audit: "shop:audit:read",
+  };
+  const canAccessSection = can(sectionPermission[section]);
+  const needsOverview = ["overview", "products", "categories", "inventory"].includes(section);
+  const needsOrders = ["overview", "orders"].includes(section);
 
   const loadOverview = useCallback(
     () =>
@@ -47,11 +59,11 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
   }, [appliedQuery, orderStatus, page]);
 
   useEffect(() => {
-    void loadOverview();
-  }, [loadOverview]);
+    if (needsOverview && canAccessSection) void loadOverview();
+  }, [canAccessSection, loadOverview, needsOverview]);
   useEffect(() => {
-    void loadOrders();
-  }, [loadOrders]);
+    if (needsOrders && canAccessSection) void loadOrders();
+  }, [canAccessSection, loadOrders, needsOrders]);
   useEffect(() => {
     if (!selectedOrder) return;
     const close = (event: KeyboardEvent) => {
@@ -69,6 +81,8 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
         ...product,
         priceMinor: Number(product.priceMinor),
         stockQty: Number(product.stockQty),
+        featuredRank: product.featuredRank ? Number(product.featuredRank) : null,
+        galleryUrls: product.galleryUrls.split("\n").map((url) => url.trim()).filter(Boolean),
       });
       await api(
         editing ? `/shop/admin/products/${editing}` : "/shop/admin/products",
@@ -114,6 +128,31 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
     }
   }
 
+  async function saveOrderNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedOrder || !orderNote.trim()) return;
+    setError("");
+    try {
+      await api(`/shop/admin/orders/${selectedOrder.id}/notes`, { method: "POST", body: JSON.stringify({ body: orderNote.trim(), isCustomerVisible: false }) });
+      setOrderNote("");
+      setMessage("Internal order note added.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not add the order note.");
+    }
+  }
+
+  async function saveShipment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedOrder) return;
+    setError("");
+    try {
+      await api(`/shop/admin/orders/${selectedOrder.id}/shipment`, { method: "PUT", body: JSON.stringify(shipment) });
+      setMessage("Shipment and tracking details saved.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not save shipment details.");
+    }
+  }
+
   function editProduct(item: Product) {
     setEditing(item.id);
     setProduct({
@@ -124,12 +163,19 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
       stockQty: String(item.stockQty),
       categoryId: item.categoryId,
       imageUrl: item.imageUrl ?? "",
+      material: item.material ?? "",
+      dimensions: item.dimensions ?? "",
+      care: item.care ?? "",
+      featuredRank: item.featuredRank ? String(item.featuredRank) : "",
+      galleryUrls: item.images.map((image) => image.url).join("\n"),
       isActive: item.isActive,
     });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  if (!data || !orders)
+  if (!canAccessSection)
+    return <section className="content-card"><p className="manager-note">You do not have access to this shop management section.</p></section>;
+  if ((needsOverview && !data) || (needsOrders && !orders))
     return (
       <section className="content-card">
         <p className="manager-note">Loading shop controls…</p>
@@ -140,8 +186,9 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
     <section className="shop-admin">
       {message && <p className="notice success">{message}</p>}
       {error && <p className="notice error">{error}</p>}
-      <ShopAdminNavigation active={section} />
-      {section === "overview" && <ShopOverviewPanel data={data} orders={orders} />}
+      <ShopAdminNavigation active={section} permissions={permissions} />
+      {section === "overview" && data && orders && <ShopOverviewPanel data={data} orders={orders} />}
+      <ShopManagementPanels section={section} products={data?.products ?? []} />
       <div
         className={`shop-admin-grid ${section}`}
         hidden={section !== "products"}
@@ -195,6 +242,27 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
                 }
               />
             </label>
+            <label>
+              Material
+              <input
+                value={product.material}
+                onChange={(event) => setProduct({ ...product, material: event.target.value })}
+              />
+            </label>
+            <label>
+              Dimensions
+              <input
+                value={product.dimensions}
+                onChange={(event) => setProduct({ ...product, dimensions: event.target.value })}
+              />
+            </label>
+            <label>
+              Care instructions
+              <textarea
+                value={product.care}
+                onChange={(event) => setProduct({ ...product, care: event.target.value })}
+              />
+            </label>
             <div>
               <label>
                 Price in cents
@@ -231,7 +299,7 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
                 }
               >
                 <option value="">Choose a category</option>
-                {data.categories.map((item) => (
+                {(data?.categories ?? []).map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>
@@ -245,6 +313,23 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
                 onChange={(event) =>
                   setProduct({ ...product, imageUrl: event.target.value })
                 }
+              />
+            </label>
+            <label>
+              Gallery image URLs (one per line)
+              <textarea
+                value={product.galleryUrls}
+                onChange={(event) => setProduct({ ...product, galleryUrls: event.target.value })}
+              />
+            </label>
+            <label>
+              Featured position
+              <input
+                type="number"
+                min="1"
+                placeholder="Leave blank for not featured"
+                value={product.featuredRank}
+                onChange={(event) => setProduct({ ...product, featuredRank: event.target.value })}
               />
             </label>
             <label className="role-check">
@@ -265,7 +350,7 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
       </div>
       {section === "categories" && (
         <CategoryManager
-          categories={data.categories}
+          categories={data?.categories ?? []}
           onChanged={loadOverview}
           onMessage={setMessage}
           onError={setError}
@@ -291,7 +376,7 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
               </tr>
             </thead>
             <tbody>
-              {data.products.map((item) => (
+              {(data?.products ?? []).map((item) => (
                 <tr key={item.id}>
                   <td>
                     <strong>{item.name}</strong>
@@ -327,7 +412,7 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
             <p className="eyebrow">Fulfilment</p>
             <h2>Orders</h2>
           </div>
-          <span className="status-dot">{orders.total} total</span>
+          <span className="status-dot">{orders?.total ?? 0} total</span>
         </div>
         <form
           className="order-filters"
@@ -377,7 +462,7 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
               </tr>
             </thead>
             <tbody>
-              {orders.items.map((order) => (
+              {(orders?.items ?? []).map((order) => (
                 <tr key={order.id}>
                   <td>
                     <strong>{order.number}</strong>
@@ -442,7 +527,7 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
             </tbody>
           </table>
         </div>
-        {!orders.items.length && (
+        {!orders?.items.length && (
           <p className="manager-note">No orders match these filters.</p>
         )}
         <div className="pagination">
@@ -453,10 +538,10 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
             Previous
           </button>
           <span>
-            Page {orders.page} of {orders.pages}
+            Page {orders?.page ?? 1} of {orders?.pages ?? 1}
           </span>
           <button
-            disabled={page >= orders.pages}
+            disabled={page >= (orders?.pages ?? 1)}
             onClick={() => setPage((value) => value + 1)}
           >
             Next
@@ -517,6 +602,10 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
                   )}
                 </dd>
               </div>
+              <div>
+                <dt>Delivery method</dt>
+                <dd>{selectedOrder.shippingLabel}<br />{selectedOrder.shippingEta}</dd>
+              </div>
             </dl>
             <div className="confirmation-lines">
               {selectedOrder.items.map((item) => (
@@ -526,7 +615,27 @@ export function ShopAdminPanel({ section = "overview" }: { section?: ShopSection
                   </span>
                 </div>
               ))}
+              <div><span>Subtotal</span><strong>{money(selectedOrder.subtotalMinor)}</strong></div>
+              <div><span>Delivery</span><strong>{selectedOrder.shippingMinor ? money(selectedOrder.shippingMinor) : "Included"}</strong></div>
+              <div><span>Total</span><strong>{money(selectedOrder.totalMinor)}</strong></div>
             </div>
+            <section className="order-operations" aria-label="Fulfilment operations">
+              <div>
+                <p className="eyebrow">Shipment</p>
+                <h3>Tracking details</h3>
+              </div>
+              <form className="shop-form compact-form" onSubmit={saveShipment}>
+                <label>Carrier<input value={shipment.carrier} onChange={(event) => setShipment({ ...shipment, carrier: event.target.value })} placeholder="Carrier name" /></label>
+                <label>Service<input value={shipment.service} onChange={(event) => setShipment({ ...shipment, service: event.target.value })} placeholder="Express / Standard" /></label>
+                <label>Tracking number<input value={shipment.trackingNumber} onChange={(event) => setShipment({ ...shipment, trackingNumber: event.target.value })} placeholder="Tracking reference" /></label>
+                <button className="admin-action" type="submit">Save shipment</button>
+              </form>
+              <p className="manager-note">Saving shipment data and the expanded Packing → Shipped workflow activate with the fulfilment API.</p>
+              <form className="shop-form compact-form" onSubmit={saveOrderNote}>
+                <label>Internal note<textarea value={orderNote} onChange={(event) => setOrderNote(event.target.value)} placeholder="Visible only to authorised shop staff" /></label>
+                <button className="text-button" type="submit">Add note</button>
+              </form>
+            </section>
           </aside>
         </div>
       )}

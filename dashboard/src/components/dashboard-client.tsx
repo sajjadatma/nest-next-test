@@ -7,7 +7,7 @@ import {
   PButton,
   PWordmark,
 } from "@porsche-design-system/components-react/ssr";
-import { api, clear, LoginHistoryEvent, Overview } from "@/lib/api";
+import { api, clear, LoginHistoryEvent, Overview, restoreSession, token } from "@/lib/api";
 import { Toast } from "@/components/toast";
 import { SystemLogsPanel } from "@/components/system-logs-panel";
 import { ShopAdminPanel } from "@/components/shop-admin-panel";
@@ -83,16 +83,24 @@ export function DashboardClient({
   const [error, setError] = useState("");
   const canManageRoles = (user?.permissions ?? []).includes("roles:manage");
   const canViewLogs = (user?.permissions ?? []).includes("system-logs:read");
-  const canManageShop = (user?.permissions ?? []).includes("shop:manage");
+  const canManageShop = (user?.permissions ?? []).some((permission) => permission === "shop:manage" || permission.startsWith("shop:"));
 
   useEffect(() => {
-    api<CurrentUser>("/auth/me")
-      .then(async (account) => {
+    let active = true;
+    void (async () => {
+      try {
+        if (!token() && !await restoreSession()) {
+          clear();
+          if (active) router.replace("/login");
+          return;
+        }
+        const account = await api<CurrentUser>("/auth/me");
         const normalized = {
           ...account,
           roles: account.roles ?? [],
           permissions: account.permissions ?? [],
         };
+        if (!active) return;
         setUser(normalized);
         setProfileName(normalized.name ?? "");
         const [overview, history, roleCatalogue, permissionCatalogue, users] =
@@ -130,11 +138,12 @@ export function DashboardClient({
             ]),
           ),
         );
-      })
-      .catch(() => {
+      } catch {
         clear();
-        router.replace("/login");
-      });
+        if (active) router.replace("/login");
+      }
+    })();
+    return () => { active = false; };
   }, [router]);
 
   async function updateProfile(event: FormEvent<HTMLFormElement>) {
@@ -639,7 +648,7 @@ export function DashboardClient({
           )}
           {view === "logs" && canViewLogs && <SystemLogsPanel />}
           {view === "shop" && canManageShop && (
-            <ShopAdminPanel section={shopSection} />
+            <ShopAdminPanel section={shopSection} permissions={user.permissions} />
           )}
         </div>
       </section>

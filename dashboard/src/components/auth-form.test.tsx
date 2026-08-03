@@ -50,6 +50,7 @@ describe('AuthForm', () => {
   });
 
   it('redirects an authenticated visitor away from the login route', async () => {
+    server.use(http.post('http://127.0.0.1:5050/api/auth/refresh', () => HttpResponse.json({ accessToken: 'token-1', user: { id: '1', email: 'jane@example.com' } })));
     server.use(http.get('http://127.0.0.1:5050/api/auth/me', () => HttpResponse.json({ id: '1', email: 'jane@example.com' })));
     render(<AuthForm mode="login" />);
 
