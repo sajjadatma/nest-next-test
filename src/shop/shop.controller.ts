@@ -1,11 +1,11 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, OrderQuoteDto } from './dto/create-order.dto';
 import { ShopService } from './shop.service';
 import { AdminOrdersQueryDto, AnalyticsQueryDto, CreateOrderNoteDto, CreateProductCommentDto, InventoryAdjustmentDto, ManageOrderStatusDto, ManagementPageQueryDto, ModerateManagedCommentDto, ModerateCommentDto, MoveCategoryDto, SaveCategoryDto, SaveProductDto, SavePromotionDto, SaveShipmentDto, SaveShippingMethodDto } from './dto/manage-shop.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PermissionsGuard } from '../rbac/permissions.guard';
-import { RequirePermissions } from '../rbac/require-permissions.decorator';
+import { RequireAnyPermissions, RequirePermissions } from '../rbac/require-permissions.decorator';
 import { PermissionKey } from '../rbac/rbac.constants';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
@@ -32,6 +32,8 @@ export class ShopController {
   @Get('shipping-options') shippingOptions() { return this.shop.shippingOptions(); }
   @Get('categories') @ApiOperation({ summary: 'List product categories' }) @ApiOkResponse()
   categories() { return this.shop.categories(); }
+  @Post('order-quote') @ApiOperation({ summary: 'Preview a cash-on-delivery order total without reserving stock' }) @ApiOkResponse()
+  orderQuote(@Body() dto: OrderQuoteDto) { return this.shop.quoteOrder(dto); }
   @Post('orders') @UseGuards(OptionalJwtAuthGuard) @ApiOperation({ summary: 'Place an idempotent cash-on-delivery order' }) @ApiCreatedResponse()
   order(@Body() dto: CreateOrderDto, @CurrentUser() user?: { id: string; email: string }) { return this.shop.createOrder(dto, user); }
   @Get('orders/confirmation/:token')
@@ -41,7 +43,11 @@ export class ShopController {
 
   @Get('admin/overview') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopManage) @ApiBearerAuth()
   adminOverview() { return this.shop.adminOverview(); }
-  @Get('admin/orders') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopOrdersRead) @ApiBearerAuth()
+  @Get('admin/catalog') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopCatalogManage) @ApiBearerAuth()
+  adminCatalog() { return this.shop.adminCatalog(); }
+  @Get('admin/inventory') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopInventoryManage) @ApiBearerAuth()
+  adminInventory() { return this.shop.adminInventory(); }
+  @Get('admin/orders') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequireAnyPermissions(PermissionKey.ShopOrdersRead, PermissionKey.ShopOrdersFulfill) @ApiBearerAuth()
   adminOrders(@Query() query: AdminOrdersQueryDto) { return this.shop.adminOrders(query.page, query.q, query.status); }
   @Post('admin/categories') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopCatalogManage) @ApiBearerAuth()
   createCategory(@Body() dto: SaveCategoryDto, @CurrentUser() actor: { id: string }) { return this.shop.createCategory(dto, actor.id); }

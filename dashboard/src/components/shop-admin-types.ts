@@ -38,7 +38,7 @@ export type Product = {
   category: Category;
 };
 
-export type OrderStatus = "PENDING" | "CONFIRMED" | "FULFILLED" | "CANCELLED";
+export type OrderStatus = "PENDING" | "CONFIRMED" | "PACKING" | "SHIPPED" | "DELIVERED" | "FULFILLED" | "CANCELLED";
 
 export type Order = {
   id: string;
@@ -118,6 +118,9 @@ export const emptyProduct: ProductDraft = {
 export const statuses: OrderStatus[] = [
   "PENDING",
   "CONFIRMED",
+  "PACKING",
+  "SHIPPED",
+  "DELIVERED",
   "FULFILLED",
   "CANCELLED",
 ];

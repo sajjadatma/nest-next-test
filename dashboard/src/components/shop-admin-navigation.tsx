@@ -29,6 +29,7 @@ const sectionPermissions: Partial<Record<ShopSection, string>> = {
 export function ShopAdminNavigation({ active, permissions }: { active: ShopSection; permissions: string[] }) {
   const canAccess = (section: ShopSection) =>
     permissions.includes("shop:manage") ||
+    (section === "orders" && permissions.includes("shop:orders:fulfill")) ||
     (sectionPermissions[section] ? permissions.includes(sectionPermissions[section]) : false);
   return (
     <nav className="shop-admin-nav" aria-label="Shop management">

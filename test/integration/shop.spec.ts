@@ -115,6 +115,17 @@ describe('Shop integration', () => {
     expect(order.body).toMatchObject({ subtotalMinor: 2500, shippingMinor: 1200, totalMinor: 3700, shippingMethod: 'express' });
   });
 
+  it('quotes the exact cash-on-delivery total without reserving stock', async () => {
+    const category = await prisma.category.create({ data: { name: `Quote ${randomUUID()}`, slug: `quote-${randomUUID()}` } });
+    const product = await prisma.product.create({ data: { name: 'Quote product', slug: `quote-product-${randomUUID()}`, description: 'For quote coverage', priceMinor: 2500, stockQty: 2, categoryId: category.id } });
+    const promotion = await prisma.promotion.create({ data: { code: `QUOTE${randomUUID().slice(0, 6)}`.toUpperCase(), type: 'PERCENTAGE', value: 10 } });
+    const quote = await request(app.getHttpServer()).post('/api/shop/order-quote').send({ items: [{ productId: product.id, quantity: 1 }], shippingMethod: 'express', promotionCode: promotion.code });
+    expect(quote.status).toBe(201);
+    expect(quote.body).toMatchObject({ subtotalMinor: 2500, discountMinor: 250, shippingMinor: 1200, totalMinor: 3450, promotionCode: promotion.code });
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: product.id } })).stockQty).toBe(2);
+    expect((await prisma.promotion.findUniqueOrThrow({ where: { id: promotion.id } })).usedCount).toBe(0);
+  });
+
   it('persists favorites and authenticated product comments', async () => {
     const authorization = { Authorization: `Bearer ${token}` };
     expect((await request(app.getHttpServer()).put(`/api/shop/products/${productId}/favorite`).set(authorization)).status).toBe(200);
@@ -162,6 +173,7 @@ describe('Shop integration', () => {
     const staff = await registerScopedUser(['shop:orders:fulfill']);
 
     expect((await request(app.getHttpServer()).get('/api/shop/admin/overview').set(staff.authorization)).status).toBe(403);
+    expect((await request(app.getHttpServer()).get('/api/shop/admin/orders').set(staff.authorization)).status).toBe(200);
 
     const note = await request(app.getHttpServer()).post(`/api/shop/admin/orders/${order.id}/notes`).set(staff.authorization).send({ body: 'Packed with care.', isCustomerVisible: false });
     expect(note.status).toBe(201);
@@ -170,6 +182,12 @@ describe('Shop integration', () => {
     const shipment = await request(app.getHttpServer()).post(`/api/shop/admin/orders/${order.id}/shipments`).set(staff.authorization).send({ carrier: 'Test carrier', service: 'Ground', trackingNumber: 'TRACK-123' });
     expect(shipment.status).toBe(201);
     expect(await prisma.shipment.findUnique({ where: { id: shipment.body.id } })).toMatchObject({ orderId: order.id, carrier: 'Test carrier', trackingNumber: 'TRACK-123' });
+  });
+
+  it('loads scoped catalogue and inventory data without global shop access', async () => {
+    const authorization = { Authorization: `Bearer ${token}` };
+    expect((await request(app.getHttpServer()).get('/api/shop/admin/catalog').set(authorization)).status).toBe(200);
+    expect((await request(app.getHttpServer()).get('/api/shop/admin/inventory').set(authorization)).status).toBe(200);
   });
 
   it('enforces the reports API contract for an analytics-only staff member', async () => {

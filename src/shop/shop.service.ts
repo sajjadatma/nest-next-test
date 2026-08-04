@@ -3,7 +3,7 @@ import { CommentStatus, InventoryMovementReason, OrderStatus, Prisma, PromotionT
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, OrderQuoteDto } from './dto/create-order.dto';
 import { AnalyticsQueryDto, CreateOrderNoteDto, CreateProductCommentDto, InventoryAdjustmentDto, MoveCategoryDto, SaveCategoryDto, SaveProductDto, SavePromotionDto, SaveShipmentDto, SaveShippingMethodDto } from './dto/manage-shop.dto';
 import { OrderNotificationService } from './order-notification.service';
 import { CATALOG } from './catalog-data';
@@ -99,6 +99,23 @@ export class ShopService implements OnModuleInit {
 
   shippingOptions() { return this.prisma.shippingMethod.findMany({ where: { isActive: true }, select: { code: true, label: true, description: true, eta: true, priceMinor: true }, orderBy: [{ position: 'asc' }, { label: 'asc' }] }).then((methods) => methods.map(({ code, ...method }) => ({ id: code, ...method }))); }
 
+  async quoteOrder(dto: OrderQuoteDto) {
+    const merged = new Map<string, number>();
+    for (const item of dto.items) merged.set(item.productId, (merged.get(item.productId) ?? 0) + item.quantity);
+    if ([...merged.values()].some((quantity) => quantity > 20)) throw new BadRequestException('A maximum of 20 units per product is allowed.');
+    const [products, shipping] = await Promise.all([
+      this.prisma.product.findMany({ where: { id: { in: [...merged.keys()] }, isActive: true }, select: { id: true, name: true, priceMinor: true, stockQty: true } }),
+      this.prisma.shippingMethod.findFirst({ where: { code: dto.shippingMethod.trim().toLowerCase(), isActive: true }, select: { code: true, label: true, description: true, eta: true, priceMinor: true } }),
+    ]);
+    if (products.length !== merged.size) throw new BadRequestException('One or more products are no longer available.');
+    if (products.some((product) => product.stockQty < (merged.get(product.id) ?? 0))) throw new BadRequestException('One or more products no longer have enough stock.');
+    if (!shipping) throw new BadRequestException('Select a valid delivery method.');
+    const subtotalMinor = products.reduce((sum, product) => sum + product.priceMinor * (merged.get(product.id) ?? 0), 0);
+    const promotion = dto.promotionCode ? await this.validatePromotion(this.prisma, dto.promotionCode, subtotalMinor) : null;
+    const discountMinor = promotion ? this.discountForPromotion(promotion, subtotalMinor) : 0;
+    return { subtotalMinor, discountMinor, shippingMinor: shipping.priceMinor, totalMinor: subtotalMinor + shipping.priceMinor - discountMinor, promotionCode: promotion?.code ?? null, shipping: { id: shipping.code, label: shipping.label, description: shipping.description, eta: shipping.eta } };
+  }
+
   categories() { return this.prisma.category.findMany({ select: { id: true, name: true, slug: true, parentId: true, position: true, _count: { select: { products: { where: { isActive: true } }, children: true } } }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }); }
 
   async createOrder(dto: CreateOrderDto, customer?: { id: string; email: string } | null) {
@@ -171,6 +188,19 @@ export class ShopService implements OnModuleInit {
     ]);
     const catalogue = await this.prisma.product.findMany({ include: { category: true, images: { orderBy: { position: 'asc' } } }, orderBy: { updatedAt: 'desc' } });
     return { metrics: { products, orders, customers, revenueMinor: revenue._sum.totalMinor ?? 0 }, products: catalogue, categories };
+  }
+
+  async adminCatalog() {
+    const [products, categories] = await Promise.all([
+      this.prisma.product.findMany({ include: { category: true, images: { orderBy: { position: 'asc' } } }, orderBy: { updatedAt: 'desc' } }),
+      this.prisma.category.findMany({ include: { _count: { select: { products: true, children: true } } }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
+    ]);
+    return { products, categories };
+  }
+
+  async adminInventory() {
+    const products = await this.prisma.product.findMany({ include: { category: true, images: { orderBy: { position: 'asc' } } }, orderBy: [{ stockQty: 'asc' }, { name: 'asc' }] });
+    return { products };
   }
 
   async adminOrders(page = 1, query = '', status?: OrderStatus) {
@@ -401,7 +431,7 @@ export class ShopService implements OnModuleInit {
     }
   }
 
-  private async validatePromotion(tx: Prisma.TransactionClient, code: string, subtotalMinor: number) {
+  private async validatePromotion(tx: Prisma.TransactionClient | PrismaService, code: string, subtotalMinor: number) {
     const now = new Date();
     const promotion = await tx.promotion.findFirst({ where: { code: code.trim().toUpperCase(), isActive: true } });
     if (!promotion || (promotion.startsAt && promotion.startsAt > now) || (promotion.endsAt && promotion.endsAt < now)) throw new BadRequestException('This promotion is not available.');

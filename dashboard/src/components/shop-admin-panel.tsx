@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { ShopAdminNavigation } from "@/components/shop-admin-navigation";
 import { ShopOverviewPanel } from "@/components/shop-overview-panel";
@@ -18,12 +18,35 @@ import {
   statuses,
 } from "@/components/shop-admin-types";
 
+const orderTransitions: Record<OrderStatus, OrderStatus[]> = {
+  PENDING: ["CONFIRMED", "CANCELLED"],
+  CONFIRMED: ["PACKING", "FULFILLED", "CANCELLED"],
+  PACKING: ["SHIPPED", "CANCELLED"],
+  SHIPPED: ["DELIVERED"],
+  DELIVERED: [],
+  FULFILLED: [],
+  CANCELLED: [],
+};
+const orderStatusLabels: Record<OrderStatus, string> = {
+  PENDING: "Order received",
+  CONFIRMED: "Confirmed",
+  PACKING: "Preparing",
+  SHIPPED: "On the way",
+  DELIVERED: "Delivered",
+  FULFILLED: "Complete",
+  CANCELLED: "Cancelled",
+};
+
 export function ShopAdminPanel({ section = "overview", permissions }: { section?: ShopSection; permissions: string[] }) {
   const [data, setData] = useState<ShopData | null>(null);
   const [orders, setOrders] = useState<OrderPage | null>(null);
   const [product, setProduct] = useState(emptyProduct);
   const [editing, setEditing] = useState<string | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [pendingOrderAction, setPendingOrderAction] = useState<{ order: Order; status: OrderStatus } | null>(null);
+  const [cancellationReason, setCancellationReason] = useState("");
+  const detailCloseRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const [orderQuery, setOrderQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [orderStatus, setOrderStatus] = useState("");
@@ -33,12 +56,15 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const can = (permission?: string) => permissions.includes("shop:manage") || Boolean(permission && permissions.includes(permission));
+  const canAny = (...required: string[]) => permissions.includes("shop:manage") || required.some((permission) => permissions.includes(permission));
+  const canFulfillOrders = can("shop:orders:fulfill");
+  const selectedOrderId = selectedOrder?.id;
   const sectionPermission: Partial<Record<ShopSection, string>> = {
     products: "shop:catalog:manage", categories: "shop:catalog:manage", inventory: "shop:inventory:manage",
     orders: "shop:orders:read", shipping: "shop:shipping:manage", promotions: "shop:promotions:manage",
     moderation: "shop:comments:moderate", reports: "shop:analytics:read", audit: "shop:audit:read",
   };
-  const canAccessSection = can(sectionPermission[section]);
+  const canAccessSection = section === "orders" ? canAny("shop:orders:read", "shop:orders:fulfill") : can(sectionPermission[section]);
   const needsOverview = ["overview", "products", "categories", "inventory"].includes(section);
   const needsOrders = ["overview", "orders"].includes(section);
 
@@ -47,6 +73,14 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
       api<ShopData>("/shop/admin/overview")
         .then(setData)
         .catch((reason: Error) => setError(reason.message)),
+    [],
+  );
+  const loadCatalog = useCallback(
+    () => api<Pick<ShopData, "products" | "categories">>("/shop/admin/catalog").then((catalog) => setData((current) => ({ metrics: current?.metrics ?? { products: catalog.products.length, orders: 0, customers: 0, revenueMinor: 0 }, ...catalog }))).catch((reason: Error) => setError(reason.message)),
+    [],
+  );
+  const loadInventory = useCallback(
+    () => api<{ products: Product[] }>("/shop/admin/inventory").then(({ products }) => setData((current) => ({ metrics: current?.metrics ?? { products: products.length, orders: 0, customers: 0, revenueMinor: 0 }, categories: current?.categories ?? [], products }))).catch((reason: Error) => setError(reason.message)),
     [],
   );
   const loadOrders = useCallback(() => {
@@ -59,19 +93,28 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
   }, [appliedQuery, orderStatus, page]);
 
   useEffect(() => {
-    if (needsOverview && canAccessSection) void loadOverview();
-  }, [canAccessSection, loadOverview, needsOverview]);
+    if (!needsOverview || !canAccessSection) return;
+    if (section === "overview") void loadOverview();
+    else if (section === "inventory") void loadInventory();
+    else void loadCatalog();
+  }, [canAccessSection, loadCatalog, loadInventory, loadOverview, needsOverview, section]);
   useEffect(() => {
     if (needsOrders && canAccessSection) void loadOrders();
   }, [canAccessSection, loadOrders, needsOrders]);
   useEffect(() => {
-    if (!selectedOrder) return;
+    if (!selectedOrderId) return;
+    detailCloseRef.current?.focus();
     const close = (event: KeyboardEvent) => {
       if (event.key === "Escape") setSelectedOrder(null);
+      if (event.key === "Tab") {
+        const dialog = document.querySelector<HTMLElement>(".admin-order-detail");
+        const focusable = dialog ? [...dialog.querySelectorAll<HTMLElement>("button, input, select, textarea, a[href]")].filter((element) => !element.hasAttribute("disabled")) : [];
+        if (focusable.length && (event.shiftKey ? document.activeElement === focusable[0] : document.activeElement === focusable[focusable.length - 1])) { event.preventDefault(); (event.shiftKey ? focusable[focusable.length - 1] : focusable[0]).focus(); }
+      }
     };
     document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [selectedOrder]);
+    return () => { document.removeEventListener("keydown", close); previousFocusRef.current?.focus(); previousFocusRef.current = null; };
+  }, [selectedOrderId]);
 
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -91,7 +134,7 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
       setProduct(emptyProduct);
       setEditing(null);
       setMessage(editing ? "Product updated." : "Product created.");
-      await loadOverview();
+      await loadCatalog();
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Could not save product.",
@@ -99,26 +142,32 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
     }
   }
 
-  async function updateOrder(order: Order, status: OrderStatus) {
-    const reason =
-      status === "CANCELLED" ? window.prompt("Cancellation reason") : undefined;
-    if (status === "CANCELLED" && reason === null) return;
+  function requestOrderUpdate(order: Order, status: OrderStatus) {
+    setCancellationReason("");
+    setPendingOrderAction({ order, status });
+  }
+
+  async function updateOrder() {
+    if (!pendingOrderAction) return;
+    const { order, status } = pendingOrderAction;
+    if (status === "CANCELLED" && !cancellationReason.trim()) { setError("Add a reason before cancelling this order."); return; }
     setError("");
     try {
       const updated = await api<Order>(
         `/shop/admin/orders/${order.id}/status`,
         {
           method: "PATCH",
-          body: JSON.stringify({ status, reason: reason || undefined }),
+          body: JSON.stringify({ status, reason: cancellationReason.trim() || undefined }),
         },
       );
       setSelectedOrder(updated);
+      setPendingOrderAction(null);
       setMessage(
         status === "CANCELLED"
           ? "Order cancelled and inventory restored."
           : "Order status updated.",
       );
-      await Promise.all([loadOrders(), loadOverview()]);
+      await Promise.all([loadOrders(), can("shop:manage") ? loadOverview() : Promise.resolve()]);
     } catch (reasonValue) {
       setError(
         reasonValue instanceof Error
@@ -174,7 +223,16 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
   }
 
   if (!canAccessSection)
-    return <section className="content-card"><p className="manager-note">You do not have access to this shop management section.</p></section>;
+    return (
+      <section className="shop-admin">
+        <ShopAdminNavigation active={section} permissions={permissions} />
+        <section className="content-card">
+          <p className="eyebrow">Shop access</p>
+          <h2>Choose an area you can manage</h2>
+          <p className="manager-note">This role does not include the Overview permission. Use the shop navigation above to open an approved area.</p>
+        </section>
+      </section>
+    );
   if ((needsOverview && !data) || (needsOrders && !orders))
     return (
       <section className="content-card">
@@ -351,7 +409,7 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
       {section === "categories" && (
         <CategoryManager
           categories={data?.categories ?? []}
-          onChanged={loadOverview}
+          onChanged={loadCatalog}
           onMessage={setMessage}
           onError={setError}
         />
@@ -441,7 +499,7 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
             >
               <option value="">All statuses</option>
               {statuses.map((status) => (
-                <option key={status}>{status}</option>
+                <option key={status} value={status}>{orderStatusLabels[status]}</option>
               ))}
             </select>
           </label>
@@ -485,39 +543,20 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
                   </td>
                   <td>{money(order.totalMinor)}</td>
                   <td>
-                    <select
-                      aria-label={`Status for ${order.number}`}
-                      value={order.status}
-                      disabled={
-                        order.status === "FULFILLED" ||
-                        order.status === "CANCELLED"
-                      }
-                      onChange={(event) =>
-                        void updateOrder(
-                          order,
-                          event.target.value as OrderStatus,
-                        )
-                      }
-                    >
-                      <option>{order.status}</option>
-                      {order.status === "PENDING" && (
-                        <>
-                          <option>CONFIRMED</option>
-                          <option>CANCELLED</option>
-                        </>
-                      )}
-                      {order.status === "CONFIRMED" && (
-                        <>
-                          <option>FULFILLED</option>
-                          <option>CANCELLED</option>
-                        </>
-                      )}
-                    </select>
+                    {canFulfillOrders ? <select
+                        aria-label={`Status for ${order.number}`}
+                        value={order.status}
+                        disabled={!orderTransitions[order.status].length}
+                        onChange={(event) => requestOrderUpdate(order, event.target.value as OrderStatus)}
+                      >
+                        <option value={order.status}>{orderStatusLabels[order.status]}</option>
+                        {orderTransitions[order.status].map((nextStatus) => <option key={nextStatus} value={nextStatus}>{orderStatusLabels[nextStatus]}</option>)}
+                      </select> : <span className="event-badge login">{orderStatusLabels[order.status]}</span>}
                   </td>
                   <td>
                     <button
                       className="text-button"
-                      onClick={() => setSelectedOrder(order)}
+                      onClick={(event) => { previousFocusRef.current = event.currentTarget; setSelectedOrder(order); }}
                     >
                       Details
                     </button>
@@ -548,6 +587,17 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
           </button>
         </div>
       </section>
+      {pendingOrderAction && (
+        <div className="admin-confirm-overlay" role="presentation">
+          <section className="admin-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="order-confirm-title" aria-describedby="order-confirm-copy">
+            <p className="eyebrow">Confirm order change</p>
+            <h2 id="order-confirm-title">{pendingOrderAction.status === "CANCELLED" ? "Cancel this order?" : `Move ${pendingOrderAction.order.number} forward?`}</h2>
+            <p id="order-confirm-copy">{pendingOrderAction.status === "CANCELLED" ? "The order will be cancelled and reserved stock will be restored." : `The order will move to ${orderStatusLabels[pendingOrderAction.status].toLowerCase()}.`}</p>
+            {pendingOrderAction.status === "CANCELLED" && <label>Cancellation reason<textarea autoFocus value={cancellationReason} onChange={(event) => setCancellationReason(event.target.value)} placeholder="Explain why this order is being cancelled" required /></label>}
+            <div className="dialog-actions"><button className="shop-secondary" type="button" onClick={() => setPendingOrderAction(null)}>Keep order</button><button className="admin-action destructive-action" type="button" onClick={() => void updateOrder()}>{pendingOrderAction.status === "CANCELLED" ? "Cancel order" : "Confirm change"}</button></div>
+          </section>
+        </div>
+      )}
       {selectedOrder && (
         <div className="admin-order-overlay">
           <aside
@@ -562,6 +612,7 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
                 <h2 id="order-detail-title">{selectedOrder.number}</h2>
               </div>
               <button
+                ref={detailCloseRef}
                 aria-label="Close order detail"
                 onClick={() => setSelectedOrder(null)}
               >
@@ -593,7 +644,7 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
               <div>
                 <dt>Status</dt>
                 <dd>
-                  {selectedOrder.status}
+                  {orderStatusLabels[selectedOrder.status]}
                   {selectedOrder.cancellationReason && (
                     <>
                       <br />
@@ -619,23 +670,23 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
               <div><span>Delivery</span><strong>{selectedOrder.shippingMinor ? money(selectedOrder.shippingMinor) : "Included"}</strong></div>
               <div><span>Total</span><strong>{money(selectedOrder.totalMinor)}</strong></div>
             </div>
-            <section className="order-operations" aria-label="Fulfilment operations">
-              <div>
-                <p className="eyebrow">Shipment</p>
-                <h3>Tracking details</h3>
-              </div>
-              <form className="shop-form compact-form" onSubmit={saveShipment}>
-                <label>Carrier<input value={shipment.carrier} onChange={(event) => setShipment({ ...shipment, carrier: event.target.value })} placeholder="Carrier name" /></label>
-                <label>Service<input value={shipment.service} onChange={(event) => setShipment({ ...shipment, service: event.target.value })} placeholder="Express / Standard" /></label>
-                <label>Tracking number<input value={shipment.trackingNumber} onChange={(event) => setShipment({ ...shipment, trackingNumber: event.target.value })} placeholder="Tracking reference" /></label>
-                <button className="admin-action" type="submit">Save shipment</button>
-              </form>
-              <p className="manager-note">Saving shipment data and the expanded Packing → Shipped workflow activate with the fulfilment API.</p>
-              <form className="shop-form compact-form" onSubmit={saveOrderNote}>
-                <label>Internal note<textarea value={orderNote} onChange={(event) => setOrderNote(event.target.value)} placeholder="Visible only to authorised shop staff" /></label>
-                <button className="text-button" type="submit">Add note</button>
-              </form>
-            </section>
+            {canFulfillOrders ? <section className="order-operations" aria-label="Fulfilment operations">
+                <div>
+                  <p className="eyebrow">Shipment</p>
+                  <h3>Tracking details</h3>
+                </div>
+                <form className="shop-form compact-form" onSubmit={saveShipment}>
+                  <label>Carrier<input value={shipment.carrier} onChange={(event) => setShipment({ ...shipment, carrier: event.target.value })} placeholder="Carrier name" /></label>
+                  <label>Service<input value={shipment.service} onChange={(event) => setShipment({ ...shipment, service: event.target.value })} placeholder="Express / Standard" /></label>
+                  <label>Tracking number<input value={shipment.trackingNumber} onChange={(event) => setShipment({ ...shipment, trackingNumber: event.target.value })} placeholder="Tracking reference" /></label>
+                  <button className="admin-action" type="submit">Save shipment</button>
+                </form>
+                <p className="manager-note">Keep tracking details current as the order moves through Packing, Shipped, and Delivered.</p>
+                <form className="shop-form compact-form" onSubmit={saveOrderNote}>
+                  <label>Internal note<textarea value={orderNote} onChange={(event) => setOrderNote(event.target.value)} placeholder="Visible only to authorised shop staff" /></label>
+                  <button className="text-button" type="submit">Add note</button>
+                </form>
+              </section> : <p className="manager-note">Read-only order access. Fulfilment controls are hidden for this role.</p>}
           </aside>
         </div>
       )}

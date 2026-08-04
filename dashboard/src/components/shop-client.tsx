@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, restoreSession } from "@/lib/api";
 import { ProductCard } from "@/components/product-card";
 import type { Category, Product } from "@/components/shop-types";
@@ -17,15 +17,38 @@ export function ShopClient() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const initializedFromUrl = useRef(false);
 
   useEffect(() => {
     let active = true;
     queueMicrotask(() => {
-      const initialCategory = new URLSearchParams(window.location.search).get("category");
-      if (active && initialCategory) setCategory(initialCategory);
+      const params = new URLSearchParams(window.location.search);
+      const initialCategory = params.get("category");
+      const initialQuery = params.get("q");
+      const initialSort = params.get("sort");
+      const initialPage = Number(params.get("page"));
+      if (!active) return;
+      if (initialCategory) setCategory(initialCategory);
+      if (initialQuery) setQuery(initialQuery);
+      if (["featured", "price-low", "price-high", "name"].includes(initialSort ?? "")) setSort(initialSort ?? "featured");
+      if (params.get("saved") === "1") setFavoritesOnly(true);
+      if (Number.isInteger(initialPage) && initialPage > 0) setPage(initialPage);
+      initializedFromUrl.current = true;
     });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!initializedFromUrl.current) return;
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    if (query.trim()) params.set("q", query.trim());
+    if (sort !== "featured") params.set("sort", sort);
+    if (favoritesOnly) params.set("saved", "1");
+    if (page > 1) params.set("page", String(page));
+    const next = params.toString();
+    window.history.replaceState(window.history.state, "", next ? `/shop?${next}` : "/shop");
+  }, [category, favoritesOnly, page, query, sort]);
 
   useEffect(() => {
     let active = true;
@@ -132,14 +155,14 @@ export function ShopClient() {
           </label>
         </div>
         <div className="collection-controls">
-          <div className="shop-filters" aria-label="Filter collection">
-            <button className={!category && !favoritesOnly ? "selected" : ""} onClick={() => resetPage(() => { setCategory(""); setFavoritesOnly(false); })}>All pieces <span>{products.length}</span></button>
+          <div className="shop-filters" role="group" aria-label="Filter collection">
+            <button type="button" aria-pressed={!category && !favoritesOnly} className={!category && !favoritesOnly ? "selected" : ""} onClick={() => resetPage(() => { setCategory(""); setFavoritesOnly(false); })}>All pieces <span>{products.length}</span></button>
             {categories.map((group) => (
-              <button key={group.slug} className={category === group.slug && !favoritesOnly ? "selected" : ""} onClick={() => resetPage(() => { setCategory(group.slug); setFavoritesOnly(false); })}>
+              <button type="button" key={group.slug} aria-pressed={category === group.slug && !favoritesOnly} className={category === group.slug && !favoritesOnly ? "selected" : ""} onClick={() => resetPage(() => { setCategory(group.slug); setFavoritesOnly(false); })}>
                 {group.name} <span>{group._count.products}</span>
               </button>
             ))}
-            <button className={favoritesOnly ? "selected" : ""} onClick={() => resetPage(() => setFavoritesOnly(true))}>♥ Saved</button>
+            <button type="button" aria-pressed={favoritesOnly} className={favoritesOnly ? "selected" : ""} onClick={() => resetPage(() => setFavoritesOnly(true))}>♥ Saved</button>
           </div>
           <label className="shop-sort">
             <span>Sort</span>

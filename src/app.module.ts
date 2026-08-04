@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, RequestMethod } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
@@ -21,7 +21,7 @@ import { ShopModule } from './shop/shop.module';
     AppConfigModule,
     SystemLogsModule,
     AuditModule,
-    LoggerModule.forRoot({ pinoHttp: { level: process.env.LOG_LEVEL ?? 'info', genReqId: (request, response) => { const requestId = request.headers['x-request-id']?.toString() ?? randomUUID(); response.setHeader('x-request-id', requestId); return requestId; }, redact: ['req.headers.authorization', 'req.headers.cookie'], customProps: (request) => ({ requestId: request.id }) } }),
+    LoggerModule.forRoot({ forRoutes: [{ path: '{*path}', method: RequestMethod.ALL }], pinoHttp: { level: process.env.LOG_LEVEL ?? 'info', genReqId: (request, response) => { const requestId = request.headers['x-request-id']?.toString() ?? randomUUID(); response.setHeader('x-request-id', requestId); return requestId; }, redact: ['req.headers.authorization', 'req.headers.cookie'], customProps: (request) => ({ requestId: request.id }) } }),
     ThrottlerModule.forRoot([{ ttl: Number(process.env.RATE_LIMIT_TTL_MS ?? 60_000), limit: Number(process.env.RATE_LIMIT_MAX ?? 100) }]),
     ServeStaticModule.forRoot({ rootPath: join(process.cwd(), 'public'), exclude: ['/api/{*path}'] }),
     PrismaModule,

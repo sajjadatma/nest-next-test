@@ -20,7 +20,7 @@ test('registers, updates a profile, signs out, and signs back in', async ({ page
   await expect(page.getByText('Profile updated.')).toBeVisible();
 
   await page.getByRole('button', { name: 'Sign out' }).click();
-  await expect(page.getByRole('heading', { name: 'Sign in to Drive.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome back to NEST.' })).toBeVisible();
   await page.getByLabel('Email address').fill(email);
   await page.getByLabel('Password').fill(password);
   await page.getByRole('button', { name: 'Sign in' }).click();

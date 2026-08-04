@@ -24,3 +24,9 @@ export class CreateOrderDto {
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => OrderLineDto) items!: OrderLineDto[];
   @ValidateNested() @Type(() => ShippingAddressDto) shippingAddress!: ShippingAddressDto;
 }
+
+export class OrderQuoteDto {
+  @IsOptional() @IsString() @Matches(/^[A-Z0-9_-]{2,40}$/i) promotionCode?: string;
+  @IsString() @IsNotEmpty() shippingMethod!: string;
+  @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => OrderLineDto) items!: OrderLineDto[];
+}
