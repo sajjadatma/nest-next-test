@@ -121,6 +121,11 @@ export class ShopService implements OnModuleInit {
   async createOrder(dto: CreateOrderDto, customer?: { id: string; email: string } | null) {
     const existing = await this.prisma.order.findUnique({ where: { idempotencyKey: dto.idempotencyKey }, include: { items: true } });
     if (existing) return this.idempotentResponse(existing, dto);
+    if (dto.sourceAddressId && !customer?.id) throw new BadRequestException('A saved address requires an authenticated customer.');
+    if (dto.sourceAddressId && customer?.id) {
+      const address = await this.prisma.address.findFirst({ where: { id: dto.sourceAddressId, userId: customer.id, deletedAt: null }, select: { id: true } });
+      if (!address) throw new BadRequestException('The selected address is no longer available.');
+    }
     const merged = new Map<string, number>();
     for (const item of dto.items) merged.set(item.productId, (merged.get(item.productId) ?? 0) + item.quantity);
     if ([...merged.values()].some((quantity) => quantity > 20)) throw new BadRequestException('A maximum of 20 units per product is allowed.');
@@ -149,6 +154,8 @@ export class ShopService implements OnModuleInit {
           customerId: customer?.id, subtotalMinor, shippingMinor: shipping.priceMinor, discountMinor, totalMinor: subtotalMinor + shipping.priceMinor - discountMinor,
           promotionId: promotion?.id, promotionCode: promotion?.code, shippingMethod: shipping.code, shippingLabel: shipping.label, shippingEta: shipping.eta, idempotencyKey: dto.idempotencyKey,
           confirmationTokenHash: this.hash(dto.confirmationToken), shippingAddress: dto.shippingAddress as unknown as Prisma.InputJsonValue,
+          sourceAddressId: dto.sourceAddressId,
+          payments: { create: { customerId: customer?.id, amountMinor: subtotalMinor + shipping.priceMinor - discountMinor, currency: 'USD', methodType: 'CASH_ON_DELIVERY', status: 'PENDING', provider: 'manual', events: { create: { provider: 'manual', type: 'payment_pending', amountMinor: subtotalMinor + shipping.priceMinor - discountMinor } } } },
           items: { create: lines.map(({ product, quantity }) => ({ productId: product.id, productName: product.name, unitPriceMinor: product.priceMinor, quantity })) },
         }, include: { items: true } });
         await tx.orderStatusEvent.create({ data: { orderId: created.id, status: OrderStatus.PENDING, reason: 'Order placed' } });
@@ -304,6 +311,15 @@ export class ShopService implements OnModuleInit {
     });
     await this.audit.record('shop.order_status_updated', 'order', id, actorId, { previous: order.status, next, reason });
     return this.sanitizeOrder(updated);
+  }
+
+  async collectPayment(orderId: string, actorId: string) {
+    const payment = await this.prisma.payment.findFirst({ where: { orderId }, orderBy: { createdAt: 'desc' } });
+    if (!payment) throw new NotFoundException('No payment record exists for this order.');
+    if (payment.status === 'PAID') return payment;
+    const updated = await this.prisma.payment.update({ where: { id: payment.id }, data: { status: 'PAID', paidAt: new Date(), events: { create: { provider: payment.provider, type: 'payment_collected', amountMinor: payment.amountMinor } } } });
+    await this.audit.record('shop.payment_collected', 'payment', payment.id, actorId, { orderId, amountMinor: payment.amountMinor });
+    return updated;
   }
 
   async addOrderNote(orderId: string, dto: CreateOrderNoteDto, actorId: string) {

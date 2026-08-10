@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
+import { useForm } from "react-hook-form";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -31,6 +32,62 @@ type ManagedUser = {
   roles: { role: Role }[];
   permissions: { permission: Permission }[];
 };
+
+type NavigationIconName = "overview" | "shop" | "account" | "access" | "logs";
+
+function NavigationIcon({ name }: { name: NavigationIconName }) {
+  const paths: Record<NavigationIconName, ReactNode> = {
+    overview: (
+      <>
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
+      </>
+    ),
+    shop: (
+      <>
+        <path d="M4 10.5h16v9H4z" />
+        <path d="M5 10.5 6.5 4h11l1.5 6.5M9 10.5v9M15 10.5v9" />
+      </>
+    ),
+    account: (
+      <>
+        <circle cx="12" cy="8" r="3.5" />
+        <path d="M5 20c.9-3.1 3.1-4.7 7-4.7s6.1 1.6 7 4.7" />
+      </>
+    ),
+    access: (
+      <>
+        <circle cx="8" cy="8" r="3" />
+        <circle cx="17" cy="9" r="2.5" />
+        <path d="M3.5 20c.5-3.1 2-4.7 4.5-4.7s4 1.6 4.5 4.7M13 20c.3-2.2 1.5-3.4 3.7-3.4 2.1 0 3.3 1.2 3.8 3.4" />
+      </>
+    ),
+    logs: (
+      <>
+        <path d="M5 4.5h14v15H5z" />
+        <path d="M8 8h8M8 12h8M8 16h5" />
+      </>
+    ),
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="nav-item-icon"
+      focusable="false"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {paths[name]}
+    </svg>
+  );
+}
 
 export function formatHistoryTimestamp(timestamp: string, now = new Date()) {
   const event = new Date(timestamp);
@@ -75,15 +132,72 @@ export function DashboardClient({
   const [draftPermissions, setDraftPermissions] = useState<
     Record<string, string[]>
   >({});
-  const [profileName, setProfileName] = useState("");
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
+  const profileForm = useForm<{ name: string }>({ defaultValues: { name: "" } });
+  const passwordForm = useForm<{ currentPassword: string; newPassword: string }>({ defaultValues: { currentPassword: "", newPassword: "" } });
   const [saving, setSaving] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavRef = useRef<HTMLElement>(null);
+  const mobileNavToggleRef = useRef<HTMLButtonElement>(null);
+  const wasMobileNavOpen = useRef(false);
   const canManageRoles = (user?.permissions ?? []).includes("roles:manage");
   const canViewLogs = (user?.permissions ?? []).includes("system-logs:read");
   const canManageShop = (user?.permissions ?? []).some((permission) => permission === "shop:manage" || permission.startsWith("shop:"));
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      if (wasMobileNavOpen.current) {
+        mobileNavToggleRef.current?.focus();
+        wasMobileNavOpen.current = false;
+      }
+      return;
+    }
+
+    const firstFocusable = mobileNavRef.current?.querySelector<HTMLElement>(
+      "a[href], button:not([disabled])",
+    );
+    firstFocusable?.focus();
+    wasMobileNavOpen.current = true;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMobileNavOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = mobileNavRef.current
+        ? [...mobileNavRef.current.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")]
+        : [];
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !mobileNavRef.current?.contains(target) &&
+        !mobileNavToggleRef.current?.contains(target)
+      ) {
+        setMobileNavOpen(false);
+      }
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+    };
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     let active = true;
@@ -102,7 +216,7 @@ export function DashboardClient({
         };
         if (!active) return;
         setUser(normalized);
-        setProfileName(normalized.name ?? "");
+        profileForm.reset({ name: normalized.name ?? "" });
         const [overview, history, roleCatalogue, permissionCatalogue, users] =
           await Promise.all([
             api<Overview>("/dashboard"),
@@ -144,17 +258,16 @@ export function DashboardClient({
       }
     })();
     return () => { active = false; };
-  }, [router]);
+  }, [profileForm, router]);
 
-  async function updateProfile(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function updateProfile(values: { name: string }) {
     setSaving("profile");
     setMessage("");
     setError("");
     try {
       const updated = await api<CurrentUser>("/auth/me", {
         method: "PATCH",
-        body: JSON.stringify({ name: profileName }),
+        body: JSON.stringify({ name: values.name }),
       });
       setUser(updated);
       setMessage("Profile updated.");
@@ -166,18 +279,16 @@ export function DashboardClient({
       setSaving(null);
     }
   }
-  async function updatePassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function updatePassword(values: { currentPassword: string; newPassword: string }) {
     setSaving("password");
     setMessage("");
     setError("");
     try {
       await api("/auth/me/password", {
         method: "PATCH",
-        body: JSON.stringify({ currentPassword, newPassword }),
+        body: JSON.stringify(values),
       });
-      setCurrentPassword("");
-      setNewPassword("");
+      passwordForm.reset();
       setMessage("Password updated.");
     } catch (reason) {
       setError(
@@ -223,8 +334,8 @@ export function DashboardClient({
 
   if (!user || !data)
     return (
-      <main className="loading">
-        <span className="eyebrow">Loading workspace…</span>
+      <main className="loading dashboard-loading" aria-busy="true">
+        <span className="eyebrow" role="status">Loading workspace…</span>
       </main>
     );
   const name = user.name || user.email.split("@")[0];
@@ -232,35 +343,35 @@ export function DashboardClient({
     id: DashboardView;
     href: string;
     label: string;
-    icon: string;
+    icon: NavigationIconName;
     hidden?: boolean;
   }[] = [
-    { id: "overview", href: "/dashboard", label: "Overview", icon: "◫" },
+    { id: "overview", href: "/dashboard", label: "Overview", icon: "overview" },
     {
       id: "shop",
       href: "/dashboard/shop",
       label: "Shop management",
-      icon: "□",
+      icon: "shop",
       hidden: !canManageShop,
     },
     {
       id: "account",
       href: "/dashboard/account",
       label: "My account",
-      icon: "◎",
+      icon: "account",
     },
     {
       id: "access",
       href: "/dashboard/access",
       label: "Access control",
-      icon: "◇",
+      icon: "access",
       hidden: !canManageRoles,
     },
     {
       id: "logs",
       href: "/dashboard/logs",
       label: "System logs",
-      icon: "▤",
+      icon: "logs",
       hidden: !canViewLogs,
     },
   ];
@@ -268,7 +379,11 @@ export function DashboardClient({
     checked ? [...values, key] : values.filter((value) => value !== key);
 
   return (
-    <main className="app-shell">
+    <>
+      <a className="skip-link" href="#dashboard-main">
+        Skip to main content
+      </a>
+      <div className="app-shell">
       {message && (
         <Toast
           message={message}
@@ -279,7 +394,23 @@ export function DashboardClient({
       {error && (
         <Toast message={error} variant="error" onDismiss={() => setError("")} />
       )}
-      <aside className="sidebar">
+      <aside
+        ref={mobileNavRef}
+        className={`sidebar${mobileNavOpen ? " is-open" : ""}`}
+        id="dashboard-mobile-nav"
+        aria-label="Workspace navigation"
+      >
+        <div className="sidebar-mobile-head">
+          <span className="eyebrow">Workspace menu</span>
+          <button
+            className="sidebar-close"
+            type="button"
+            aria-label="Close workspace navigation"
+            onClick={() => setMobileNavOpen(false)}
+          >
+            <span className="close-mark" aria-hidden="true" />
+          </button>
+        </div>
         <div className="sidebar-brand">
           <PWordmark />
           <span>Drive</span>
@@ -293,8 +424,9 @@ export function DashboardClient({
                 href={item.href}
                 className={view === item.id ? "nav-item active" : "nav-item"}
                 aria-current={view === item.id ? "page" : undefined}
+                onClick={() => setMobileNavOpen(false)}
               >
-                <span aria-hidden>{item.icon}</span>
+                <NavigationIcon name={item.icon} />
                 {item.label}
               </Link>
             ))}
@@ -317,9 +449,30 @@ export function DashboardClient({
           </PButton>
         </div>
       </aside>
+      {mobileNavOpen && (
+        <button
+          className="mobile-nav-scrim"
+          type="button"
+          aria-label="Close workspace navigation"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
       <section className="workspace">
         <header className="workspace-header">
-          <div>
+          <div className="workspace-heading">
+            <button
+              ref={mobileNavToggleRef}
+              className="mobile-nav-toggle"
+              type="button"
+              aria-expanded={mobileNavOpen}
+              aria-controls="dashboard-mobile-nav"
+              aria-label={`${mobileNavOpen ? "Close" : "Open"} workspace navigation`}
+              onClick={() => setMobileNavOpen((open) => !open)}
+            >
+              <span className="menu-toggle-mark" aria-hidden="true" />
+              <span className="mobile-nav-toggle-label">{mobileNavOpen ? "Close" : "Menu"}</span>
+            </button>
+            <div>
             <p className="eyebrow">Drive workspace</p>
             <h1>
               {view === "overview"
@@ -332,13 +485,14 @@ export function DashboardClient({
                       ? "Access control"
                       : "System logs"}
             </h1>
+            </div>
           </div>
           <div className="header-profile">
             <span className="header-avatar">{name[0].toUpperCase()}</span>
             <span>{name}</span>
           </div>
         </header>
-        <div className="workspace-content">
+        <main id="dashboard-main" className="workspace-content">
           {view === "overview" && (
             <>
               <section className="welcome-panel">
@@ -418,13 +572,12 @@ export function DashboardClient({
                       <h2>Profile details</h2>
                     </div>
                   </div>
-                  <form className="settings-form" onSubmit={updateProfile}>
+                  <form className="settings-form" onSubmit={profileForm.handleSubmit(updateProfile)}>
                     <label>
                       Full name
                       <input
-                        value={profileName}
-                        onChange={(event) => setProfileName(event.target.value)}
                         maxLength={80}
+                        {...profileForm.register("name")}
                       />
                     </label>
                     <label>
@@ -449,29 +602,23 @@ export function DashboardClient({
                       <h2>Change password</h2>
                     </div>
                   </div>
-                  <form className="settings-form" onSubmit={updatePassword}>
+                  <form className="settings-form" onSubmit={passwordForm.handleSubmit(updatePassword)}>
                     <label>
                       Current password
                       <input
                         type="password"
-                        value={currentPassword}
-                        onChange={(event) =>
-                          setCurrentPassword(event.target.value)
-                        }
                         minLength={8}
                         required
+                        {...passwordForm.register("currentPassword", { required: true, minLength: 8 })}
                       />
                     </label>
                     <label>
                       New password
                       <input
                         type="password"
-                        value={newPassword}
-                        onChange={(event) =>
-                          setNewPassword(event.target.value)
-                        }
                         minLength={8}
                         required
+                        {...passwordForm.register("newPassword", { required: true, minLength: 8 })}
                       />
                     </label>
                     <p className="manager-note">
@@ -650,8 +797,9 @@ export function DashboardClient({
           {view === "shop" && canManageShop && (
             <ShopAdminPanel section={shopSection} permissions={user.permissions} />
           )}
-        </div>
+        </main>
       </section>
-    </main>
+      </div>
+    </>
   );
 }

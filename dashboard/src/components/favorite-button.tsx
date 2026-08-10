@@ -41,17 +41,33 @@ export function FavoriteButton({
     }
   }
 
+  const action = pending
+    ? favorite
+      ? "Removing"
+      : "Saving"
+    : favorite
+      ? "Remove"
+      : "Add";
+  const destination = favorite ? "from" : "to";
+
   return (
     <span className="favorite-control">
       <button
         type="button"
-        className={favorite ? "favorite-button selected" : "favorite-button"}
-        aria-label={`${favorite ? "Remove" : "Add"} ${productName} ${favorite ? "from" : "to"} favorites`}
+        className={`favorite-button${favorite ? " selected" : ""}${pending ? " is-pending" : ""}`}
+        aria-label={`${action} ${productName} ${destination} favorites`}
         aria-pressed={favorite}
+        aria-busy={pending}
         disabled={pending}
         onClick={toggle}
       >
-        <span aria-hidden="true">{favorite ? "♥" : "♡"}</span>
+        {pending ? (
+          <span className="favorite-spinner" aria-hidden="true" />
+        ) : (
+          <svg className="favorite-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 20.3 3.8 12.6A5.2 5.2 0 0 1 11 5l1 1 1-1a5.2 5.2 0 0 1 7.2 7.6L12 20.3Z" />
+          </svg>
+        )}
       </button>
       {message && <span className="sr-only" role="status">{message}</span>}
     </span>

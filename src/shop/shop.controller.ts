@@ -63,6 +63,8 @@ export class ShopController {
   updateProduct(@Param('id') id: string, @Body() dto: SaveProductDto, @CurrentUser() actor: { id: string }) { return this.shop.updateProduct(id, dto, actor.id); }
   @Patch('admin/orders/:id/status') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopOrdersFulfill) @ApiBearerAuth()
   updateOrder(@Param('id') id: string, @Body() dto: ManageOrderStatusDto, @CurrentUser() actor: { id: string }) { return this.shop.updateOrderStatus(id, dto.status, actor.id, dto.reason); }
+  @Post('admin/orders/:id/payment/collect') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopOrdersFulfill) @ApiBearerAuth()
+  collectPayment(@Param('id') id: string, @CurrentUser() actor: { id: string }) { return this.shop.collectPayment(id, actor.id); }
   @Patch('admin/comments/:id/status') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopCommentsModerate) @ApiBearerAuth()
   moderateComment(@Param('id') id: string, @Body() dto: ModerateCommentDto, @CurrentUser() actor: { id: string }) { return this.shop.moderateComment(id, dto.status, actor.id); }
   @Get('admin/inventory/:productId') @UseGuards(JwtAuthGuard, PermissionsGuard) @RequirePermissions(PermissionKey.ShopInventoryManage) @ApiBearerAuth()

@@ -1,6 +1,7 @@
 "use client";
 
-import { DragEvent, FormEvent, useMemo, useState } from "react";
+import { DragEvent, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
 import { api } from "@/lib/api";
 import { Category } from "@/components/shop-admin-types";
 
@@ -49,7 +50,7 @@ export function CategoryManager({
   onMessage: (message: string) => void;
   onError: (message: string) => void;
 }) {
-  const [draft, setDraft] = useState<Draft>({ name: "", slug: "", parentId: "" });
+  const { register, handleSubmit, reset: resetFormValues, formState: { isSubmitting } } = useForm<Draft>({ defaultValues: { name: "", slug: "", parentId: "" } });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropIntent, setDropIntent] = useState<DropIntent | null>(null);
@@ -62,22 +63,21 @@ export function CategoryManager({
 
   function resetForm() {
     setEditingId(null);
-    setDraft({ name: "", slug: "", parentId: "" });
+    resetFormValues({ name: "", slug: "", parentId: "" });
   }
 
   function startEditing(category: Category) {
     setEditingId(category.id);
-    setDraft({ name: category.name, slug: category.slug, parentId: category.parentId ?? "" });
+    resetFormValues({ name: category.name, slug: category.slug, parentId: category.parentId ?? "" });
   }
 
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function save(values: Draft) {
     setSaving(true);
     onError("");
     try {
       await api(editingId ? `/shop/admin/categories/${editingId}` : "/shop/admin/categories", {
         method: editingId ? "PUT" : "POST",
-        body: JSON.stringify({ ...draft, parentId: draft.parentId || null }),
+        body: JSON.stringify({ ...values, parentId: values.parentId || null }),
       });
       onMessage(editingId ? "Category updated." : "Category added.");
       resetForm();
@@ -207,19 +207,19 @@ export function CategoryManager({
           <div><p className="eyebrow">Details</p><h2>{editingId ? "Edit category" : "New category"}</h2></div>
           {editingId && <button className="text-button" type="button" onClick={resetForm}>Cancel</button>}
         </div>
-        <form className="shop-form" onSubmit={save}>
-          <label>Category name<input required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-          <label>URL slug<input required maxLength={80} value={draft.slug} onChange={(event) => setDraft({ ...draft, slug: event.target.value })} /></label>
+        <form className="shop-form" onSubmit={handleSubmit(save)}>
+          <label>Category name<input maxLength={80} {...register("name", { required: true })} /></label>
+          <label>URL slug<input maxLength={80} {...register("slug", { required: true })} /></label>
           <label>
             Parent category
-            <select value={draft.parentId} onChange={(event) => setDraft({ ...draft, parentId: event.target.value })}>
+            <select {...register("parentId")}>
               <option value="">No parent — top level</option>
               {tree.filter(({ category }) => !unavailableParents.has(category.id)).map(({ category, depth }) => (
                 <option key={category.id} value={category.id}>{"— ".repeat(depth)}{category.name}</option>
               ))}
             </select>
           </label>
-          <button className="admin-action" type="submit" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Add category"}</button>
+          <button className="admin-action" type="submit" disabled={saving || isSubmitting}>{saving || isSubmitting ? "Saving…" : editingId ? "Save changes" : "Add category"}</button>
         </form>
       </section>
     </div>

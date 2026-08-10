@@ -57,30 +57,43 @@ export const money = (minor: number, currency = "USD") =>
     minor / 100,
   );
 
-function displayImage(image: ProductImage): ProductImage {
-  // The starter catalogue was seeded with Unsplash URLs. Those are not
-  // guaranteed to be reachable (and fail noisily in restricted networks), so
-  // use the bundled shop artwork for those legacy records instead.
-  if (image.url.startsWith("https://images.unsplash.com/")) {
-    return { ...image, url: "/og.png" };
-  }
-  return image;
+export type ProductArtVariant = "clay" | "sage" | "sand" | "ink" | "lichen";
+
+const PRODUCT_ART_VARIANTS: ProductArtVariant[] = [
+  "clay",
+  "sage",
+  "sand",
+  "ink",
+  "lichen",
+];
+
+/**
+ * Product imagery is server data, so the client keeps every supplied URL
+ * intact and lets the card handle a failed remote image. This seed makes the
+ * local fallback stable per catalogue item instead of making every card look
+ * identical in a restricted network.
+ */
+export function productArtVariant(
+  product: Pick<Product, "id" | "name" | "category">,
+): ProductArtVariant {
+  const key = `${product.id}:${product.category.slug}:${product.name}`;
+  let hash = 0;
+  for (const character of key) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  return PRODUCT_ART_VARIANTS[(hash >>> 0) % PRODUCT_ART_VARIANTS.length];
 }
 
 export function productImages(product: Product): ProductImage[] {
   if (product.images?.length) {
-    return [...product.images]
-      .sort((a, b) => a.position - b.position)
-      .map(displayImage);
+    return [...product.images].sort((a, b) => a.position - b.position);
   }
   return product.imageUrl
     ? [
-        displayImage({
+        {
           id: `${product.id}-primary`,
           url: product.imageUrl,
           alt: product.name,
           position: 0,
-        }),
+        },
       ]
     : [];
 }
