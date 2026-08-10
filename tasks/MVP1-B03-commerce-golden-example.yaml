@@ -1,0 +1,80 @@
+id: MVP1-B03
+title: Commerce tool facade Golden Example (search_products + get_product)
+goal: Implement the first complete tool-first vertical slice (search_products, get_product) with strict schemas, merchant scoping, deterministic error codes, timeout/retry policy, audit metadata, correlation propagation, and full tests. This is the Backend Golden Example that all later tools must follow (SYSTEM.md section 7).
+why: ADR-003/005 and AC-01/02/04/12/14 require verified, scoped, deterministic tool access to commerce truth before any AI or channel work. Establishing the pattern now prevents divergent tool implementations.
+preconditions:
+  - MVP1-B02 DONE (variants + compatibility layer, QA PASS)
+  - Contracts v1: docs/contracts/commerce-tools.md (tool registry, error codes, result envelope)
+  - ADR-003/005 frozen
+inputs:
+  - src/commerce/variants/* (from B02)
+  - src/shop/shop.service.ts (read-only reference for catalog query patterns)
+  - src/rbac/rbac.constants.ts (read-only reference for permission conventions)
+  - docs/contracts/commerce-tools.md
+expected_output:
+  - src/commerce/commerce.module.ts (module with providers)
+  - src/commerce/commerce-tools.service.ts (search_products + get_product implementations)
+  - src/commerce/contracts/commerce-tool.contracts.ts (input/output types + ToolResult envelope + error codes)
+  - src/commerce/commerce-tools.service.spec.ts (unit tests with mocked repository)
+  - test/database/commerce-tools.integration.spec.ts (real DB: Persian/English search, merchant isolation, no-match, out-of-stock, stale-data)
+  - Audit/log events on every tool call (AuditService + correlation id)
+read_set:
+  - src/commerce/variants/**, src/shop/shop.service.ts, src/shop/dto/manage-shop.dto.ts
+  - src/audit/audit.service.ts, src/rbac/rbac.constants.ts
+  - docs/contracts/commerce-tools.md, docs/architecture/SYSTEM.md, docs/governance/ENGINEERING.md
+write_set:
+  - src/commerce/commerce.module.ts
+  - src/commerce/commerce-tools.service.ts
+  - src/commerce/contracts/commerce-tool.contracts.ts
+  - src/commerce/commerce-tools.service.spec.ts
+  - test/database/commerce-tools.integration.spec.ts
+  - src/merchant/merchant.service.ts (ONLY if a read helper is missing; list as approved deviation)
+  - "src/commerce/variants/variant.repository.ts (APPROVED by ORC - extend findMatching with query/category/budget/currency/limit; add findByProductId with images+category+defaultVariant)"
+  - "src/commerce/variants/variant-read.service.ts (APPROVED by ORC - extend search criteria; add productDetail(merchantId, productId))"
+protected_set:
+  - src/main.ts, src/app.module.ts (module registration happens in a later ORC-approved integration task, NOT here)
+  - src/auth/**, src/rbac/**, src/audit/**, src/observability/**
+  - Existing migrations, package*.json, docker-compose.yml, .env
+  - dashboard/**
+contracts:
+  - docs/contracts/commerce-tools.md (exact schemas: search_products input/result, get_product, ToolResult envelope, error codes TOOL_NOT_FOUND..INTERNAL)
+  - docs/product/PRODUCT.md AC-01/02/04/12/14
+constraints:
+  - Merchant scoping: every query MUST include merchantId filter; cross-merchant access returns MERCHANT_MISMATCH or empty scoped result (never another merchant's data).
+  - Fail closed: price/stock unverifiable -> *_UNVERIFIABLE error, never guessed values.
+  - Deterministic ordering: relevance then price ascending; stable for tests.
+  - No HTTP controller exposure in this task (service-level only).
+  - No new dependencies; follow existing Nest patterns (constructor injection, @Injectable).
+  - Every tool result includes 'at' timestamp; audit records action 'commerce.search_products' / 'commerce.get_product'.
+  - Timeout/retry: wrap repository calls per existing conventions; document policy in code comment + contract.
+implementation_notes: |-
+  - ORC-approved resolution (2026-08-10): B03 may EXTEND the B02 read boundary (variant.repository.ts + variant-read.service.ts) with scoped catalog search/detail methods. The facade (commerce-tools.service.ts) must NOT query Prisma directly - it delegates to VariantReadService.
+  - search_products: accepts merchantId, query, category, attributes, size, budgetMin, budgetMax, currency, limit (1..10); returns { matched: boolean, items: ProductCard[] } using the extended variant-first read model; exact/partial match on canonical attributes; distinguish no-match vs out-of-stock via availability field.
+  - get_product: accepts merchantId + productId; returns verified product with default variant + images + category + availability; PRODUCT_NOT_FOUND if absent for that merchant.
+  - ToolResult envelope exactly per commerce-tools.md.
+  - Follow B02 read model; do not duplicate Prisma queries that exist in variant.repository.
+acceptance_criteria:
+  - AC-01: search_products returns verified data with deterministic ordering; Persian and English queries both covered by tests.
+  - AC-02: no-match returns matched=false with reason; out-of-stock marked in availability.
+  - AC-03: cross-merchant productId lookup returns PRODUCT_NOT_FOUND (isolation).
+  - AC-04: unverifiable price/stock path returns *_UNVERIFIABLE (unit test with injected failure).
+  - AC-05: every call emits audit event + correlation id.
+  - AC-06: strict input validation rejects extra/unknown fields (forbidNonWhitelisted behavior at tool level).
+  - AC-07: no protected files modified; no dependency changes; existing suites green.
+tests_required:
+  - src/commerce/commerce-tools.service.spec.ts (unit: validation, scoping, fail-closed, ordering)
+  - test/database/commerce-tools.integration.spec.ts (real DB: fa/en search, isolation, no-match, out-of-stock, stale price visibility)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Golden Example complete: contract types, service, tests, evidence (exit codes, counts, read-backs); no protected changes; ORC records it as the pattern for B04 tools.
+non_goals:
+  - No HTTP endpoints; no AI gateway; no remaining tools (B04); no demand pipeline; no cart/checkout tools yet
+stop_conditions:
+  - Contract mismatch with commerce-tools.md; need to modify protected files; dependency addition; cross-merchant data access observed in any query
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

@@ -1,0 +1,81 @@
+id: MVP1-B10
+title: Human handoff state machine and operator summary
+goal: Implement AI-active to handoff-requested to human-active to AI-active conversation state machine with conflict-safe transitions, concise verified operator summaries, audit on every transition, and permission-gated takeover endpoints.
+why: AC-07/12/13 require stopping autonomous action on handoff conditions, a handoff record, and an operator summary; F03 (inbox UI) depends on these endpoints.
+preconditions:
+  - MVP1-F02 DONE (checkout continuation UI, QA PASS) - conversation + orchestrator live
+  - Contracts v1 frozen (messages.md human_handoff CommerceResponse; PRODUCT.md handoff states)
+  - ORC review of current Conversation model (status/owner fields exist from B05) and RBAC permission conventions (src/rbac/rbac.constants.ts)
+inputs:
+  - src/conversations/conversation.service.ts + conversation.types.ts (B05/B06 - Conversation.status, owner, referenceState)
+  - src/orchestrator/orchestrator.service.ts + conversation.controller.ts (B08 - web message path)
+  - src/rbac/rbac.constants.ts + permissions.guard.ts + require-permissions.decorator.ts (existing permission pattern)
+  - src/audit/audit.service.ts
+  - docs/product/PRODUCT.md AC-07/12/13, section 12 states; docs/contracts/messages.md
+expected_output:
+  - Prisma: HumanHandoff model (id, conversationId, merchantId, reasonCode, status REQUESTED/ACCEPTED/RESOLVED/REJECTED, requestedAt, acceptedById?, resolvedAt?, summary Json) + one migration (additive) - ORC-APPROVED schema addition if Conversation needs handoff fields beyond existing status/owner
+  - src/conversations/handoff.service.ts - requestHandoff, acceptHandoff, releaseToAi, resolveHandoff, handoffsForMerchant - all conflict-safe (guarded updates) and audited
+  - Conversation status machine - AI_ACTIVE to HANDOFF_REQUESTED to HUMAN_ACTIVE to AI_ACTIVE (existing status field extended with HANDOFF_REQUESTED/HUMAN_ACTIVE values if not present - ORC-approved enum extension)
+  - Endpoints (in orchestrator or conversations controller per ORC) - POST /api/conversations/:id/handoff, POST /api/conversations/:id/handoff/accept, POST /api/conversations/:id/handoff/release, GET /api/conversations/handoffs (merchant-scoped list for inbox) - all permission-gated with new RBAC keys (conversations:read, conversations:takeover)
+  - New RBAC permission keys in src/rbac/rbac.constants.ts (conversations:read, conversations:takeover) - ORC-approved
+  - Tests - state machine transitions, conflict safety (two operators accept - one wins), audit events, merchant isolation, permission denial, summary truthfulness
+read_set:
+  - src/conversations/**, src/orchestrator/**, src/rbac/**, src/audit/**, src/auth/current-user.decorator.ts, src/auth/jwt-auth.guard.ts
+  - prisma/schema.prisma (Conversation model), docs/product/PRODUCT.md, docs/contracts/messages.md
+write_set:
+  - prisma/schema.prisma (HumanHandoff model + Conversation status enum extension if needed - ORC-approved additive)
+  - prisma/migrations/<new-timestamp>_human_handoff/migration.sql (new, additive)
+  - src/conversations/handoff.service.ts (new)
+  - src/conversations/conversation.service.ts (extend - handoff state helpers if minimal; else keep in handoff.service)
+  - src/orchestrator/orchestrator.service.ts (extend - wire handoff requests from agent policy HANDOFF_REQUIRED)
+  - src/orchestrator/conversation.controller.ts (extend - handoff endpoints) OR src/conversations/handoff.controller.ts (new per ORC)
+  - src/rbac/rbac.constants.ts (add conversations:read, conversations:takeover keys - ORC-approved)
+  - "src/rbac/rbac.service.ts (APPROVED by ORC 2026-08-10 - seed the two new permission keys following the existing seeding pattern)"
+  - "src/orchestrator/orchestrator.module.ts (APPROVED by ORC 2026-08-10 - provide HandoffService and declare handoff controller/endpoints)"
+  - test/database/handoff.integration.spec.ts (new)
+  - test/integration/handoff.spec.ts (new - HTTP endpoints)
+protected_set:
+  - src/main.ts, src/auth/**, src/audit/**, src/observability/**, src/shop/**, src/commerce/**, src/ai/**
+  - package*.json, docker-compose.yml, .env, dashboard/** (F03 later)
+  - Existing migrations (new file only)
+contracts:
+  - docs/product/PRODUCT.md section 12 (state machine), AC-07/12/13
+  - docs/contracts/messages.md (human_handoff response)
+constraints:
+  - On HANDOFF_REQUESTED - NO autonomous commerce mutation; orchestrator must refuse tool calls until HUMAN_ACTIVE and released back to AI.
+  - Conflict-safe - acceptHandoff guarded (only from REQUESTED, single winner); releaseToAi only from HUMAN_ACTIVE by the accepting operator or merchant admin.
+  - Summary contains ONLY verified facts - customer intent (from Message.intent), verified product ids/names, unresolved issue (reasonCode + agent note); never raw PII beyond what operator already sees in the conversation.
+  - Merchant isolation - handoff queries always merchant-scoped; cross-merchant to 404.
+  - Audit every transition with actorId - conversation.handoff_requested, conversation.handoff_accepted, conversation.handoff_released, conversation.handoff_resolved.
+  - No new dependencies; no dashboard changes (F03).
+implementation_notes: |-
+  - Reuse existing Conversation.status/owner fields where possible; extend enum with HANDOFF_REQUESTED and HUMAN_ACTIVE (ORC-approved if needed).
+  - New RBAC keys must also be seeded in DB - check how existing keys are seeded (admin bootstrap or seed script; follow that pattern).
+  - Agent policy integration - when agent returns HANDOFF_REQUIRED, orchestrator calls requestHandoff with reasonCode + summary and returns human_handoff CommerceResponse.
+acceptance_criteria:
+  - AC-01: agent handoff condition creates handoff record, conversation moves to HANDOFF_REQUESTED, orchestrator stops autonomous tools (test - tool call after handoff refused).
+  - AC-02: operator accept moves to HUMAN_ACTIVE; second concurrent accept fails (one winner).
+  - AC-03: releaseToAi moves back to AI_ACTIVE and tools resume.
+  - AC-04: summary contains verified intent/products/reason; no raw PII.
+  - AC-05: merchant isolation - cross-merchant handoff access denied (404).
+  - AC-06: permission denial - user without conversations:takeover gets 403.
+  - AC-07: audit events recorded for every transition.
+  - AC-08: no protected changes beyond approved; no dependency changes; suites green.
+tests_required:
+  - test/database/handoff.integration.spec.ts (state machine, conflict, isolation)
+  - test/integration/handoff.spec.ts (HTTP + RBAC + audit)
+  - Full regression - test:preflight + test:database
+verification_commands:
+  - npm run prisma:generate && npm run prisma:migrate:deploy
+  - npm run test:database
+  - npm run test:integration
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Handoff model + service + endpoints + RBAC keys + tests; commands exit 0; evidence with state transitions, 403/404 read-backs, audit rows.
+non_goals:
+  - No operator inbox UI (F03); no channel adapters; no real LLM provider; no payment changes
+stop_conditions:
+  - Any change to auth guard internals, ai module internals, shop order flow, or protected files beyond the approved write_set
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

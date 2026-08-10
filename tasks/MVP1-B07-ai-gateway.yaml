@@ -1,0 +1,81 @@
+id: MVP1-B07
+title: LLM gateway and agent policy Golden Example
+goal: Implement the provider-neutral AI gateway (src/ai/) with a deterministic fake provider, agent policy enforcing approved tool calls, response validation that rejects fabricated facts, language/tone rules, human-handoff criteria, structured outcome emission, and stop/escalate behavior.
+why: ADR-005 and AC-07/13/14 require a testable tool-first boundary before any channel or conversation orchestration. The deterministic fake provider makes model behavior reproducible in tests without external credentials (TD-01).
+preconditions:
+  - MVP1-B06 DONE (structured intent + reference state merged, QA PASS)
+  - ADR-005 frozen; TD-01 approved (provider-neutral gateway + fake provider; real provider deferred until credentials/terms)
+  - Contracts v1: docs/contracts/messages.md (StructuredIntent, CommerceResponse), docs/contracts/commerce-tools.md (tool registry + ToolResult envelope)
+inputs:
+  - src/ai/contracts/intent.contracts.ts + intent-parser.service.ts (B06)
+  - src/commerce/commerce-tools.service.ts (B03/B04 tools)
+  - docs/contracts/messages.md, docs/contracts/commerce-tools.md
+  - docs/architecture/ADR-005-llm-tool-boundary.md
+expected_output:
+  - src/ai/ai.module.ts (extend B06 wiring; providers: gateway, policy, validator, fake provider)
+  - src/ai/gateway/llm-gateway.service.ts (provider interface + registry; FakeLlmProvider as default)
+  - src/ai/gateway/llm-provider.interface.ts
+  - src/ai/gateway/fake-llm-provider.ts (deterministic scripted responses for evaluation fixtures)
+  - src/ai/policy/agent-policy.service.ts (tool allow-list, handoff criteria, escalation rules)
+  - src/ai/validation/response-validator.service.ts (rejects fabricated price/stock/shipping facts; requires tool-cited facts)
+  - src/ai/agent.service.ts (orchestrates: intent -> policy -> tool call -> validation -> CommerceResponse; emits structured outcome)
+  - Tests: gateway unit, policy unit, validator adversarial tests, agent integration with fake provider covering the evaluation set
+read_set:
+  - src/ai/**, src/commerce/commerce-tools.service.ts, src/commerce/contracts/commerce-tool.contracts.ts
+  - docs/contracts/messages.md, docs/contracts/commerce-tools.md, docs/architecture/ADR-005-llm-tool-boundary.md
+  - docs/governance/QA.md section 5 (evaluation dimensions)
+write_set:
+  - src/ai/gateway/llm-gateway.service.ts
+  - src/ai/gateway/llm-provider.interface.ts
+  - src/ai/gateway/fake-llm-provider.ts
+  - src/ai/policy/agent-policy.service.ts
+  - src/ai/validation/response-validator.service.ts
+  - src/ai/agent.service.ts
+  - src/ai/ai.module.ts (extend)
+  - src/ai/agent.service.spec.ts (or evaluation fixtures under test/)
+  - test/database/agent.integration.spec.ts (end-to-end with fake provider against real DB)
+protected_set:
+  - src/main.ts, src/app.module.ts (registration in later integration task)
+  - src/auth/**, src/rbac/**, src/audit/**, src/observability/**, src/shop/**
+  - prisma/schema.prisma + migrations (NO schema change)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+  - No real provider SDK may be added
+contracts:
+  - docs/contracts/messages.md (StructuredIntent, CommerceResponse union)
+  - docs/contracts/commerce-tools.md (tool registry, ToolResult, error codes)
+  - ADR-005 (tool boundary)
+constraints:
+  - Fake provider is the ONLY provider wired in this task; a real provider requires a future ORC task with credential review.
+  - Agent may call ONLY allow-listed commerce tools; any other tool request -> validation failure -> HANDOFF_REQUIRED or safe refusal.
+  - Response validator must reject any response claiming price, stock, shipping, discount, or availability not present in tool results (adversarial tests).
+  - Human-handoff criteria: refund/complaint/payment/angry/policy-exception/low-confidence/out-of-scope -> human_handoff response; no autonomous commerce mutation after handoff.
+  - No secrets in prompts/logs; fake provider deterministic (same input -> same scripted output).
+  - No HTTP controllers; no schema change; no dependencies.
+implementation_notes: |-
+  - Provider interface: completeChat(messages, tools, context) -> provider response with tool_calls/structured output; FakeLlmProvider maps deterministic fixtures keyed by intent+conversation.
+  - Agent flow: normalize -> parse intent -> policy decides (tool call | clarify | handoff) -> invoke commerce tool -> validator checks response facts against tool result -> build CommerceResponse -> emit structured outcome.
+  - Evaluation fixtures must cover: Persian search, one useful clarification, exact/partial/no-match, out-of-stock, price-too-high, comparison/references, cart/handoff, refund/angry/payment handoff, malformed model output, fabrication attempt.
+acceptance_criteria:
+  - AC-01: fake provider deterministic; agent returns CommerceResponse for every fixture case.
+  - AC-02: fabricated price/stock/shipping in model output is rejected by validator (adversarial test).
+  - AC-03: non-allow-listed tool request fails safe (no execution) and routes to handoff/refusal.
+  - AC-04: handoff criteria stop autonomous mutation and emit human_handoff response.
+  - AC-05: structured outcome emitted per demand contract semantics (record_demand_outcome compatible).
+  - AC-06: no real provider SDK, no schema change, no protected changes, no dependencies; suites green.
+tests_required:
+  - src/ai/agent.service.spec.ts (fixtures, adversarial, policy)
+  - test/database/agent.integration.spec.ts (fake provider + real DB: search -> follow-up -> handoff path)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Gateway + policy + validator + agent + fake provider with tests; commands exit 0; evidence includes adversarial rejection read-backs.
+non_goals:
+  - No real provider wiring (TD-01 deferred); no HTTP endpoints; no conversation persistence integration (B08); no demand persistence (B13)
+stop_conditions:
+  - Need for a real provider credential/SDK; schema change; protected files; dependency addition; contract divergence
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

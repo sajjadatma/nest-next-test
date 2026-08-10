@@ -1,0 +1,71 @@
+id: MVP1-B14
+title: Deterministic demand aggregates API
+goal: Implement merchant-scoped deterministic SQL aggregation over DemandEvent - date/outcome filters, request volume by category, matched vs unmet demand, out-of-stock, price-too-high, top attributes/variants/sizes/colors, and small-cell threshold suppression - exposed as a read API for the F04 dashboard.
+why: AC-11/13 - the demand dashboard depends on exact, privacy-safe aggregates; LLM is never the source of numerical truth (ADR-004).
+preconditions:
+  - MVP1-B13 DONE (DemandEvent persistence + state machine, QA PASS)
+  - Contracts v1 frozen (docs/contracts/demand-events.md - views, thresholds, privacy invariants)
+  - ORC approval for RBAC key (demand:read) if dashboard access requires it (follow B10 permission seeding pattern)
+inputs:
+  - src/demand/demand.service.ts + demand.constants.ts (B13 - threshold constant, outcome enum)
+  - docs/contracts/demand-events.md (aggregation views spec, minimum threshold 5)
+  - src/rbac/rbac.constants.ts + rbac.service.ts (permission pattern - READ ONLY unless ORC approves addition)
+  - src/shop/dto/manage-shop.dto.ts (AnalyticsQueryDto date-range pattern - READ ONLY reference)
+expected_output:
+  - src/demand/demand-aggregates.service.ts - deterministic SQL queries (Prisma $queryRaw or groupBy): volumeByCategory(merchantId, from, to), matchedVsUnmet, outOfStockDemand, priceTooHighDemand, topAttributes, topSizesColors, trendDirection (threshold-gated)
+  - src/demand/demand.controller.ts - GET /api/demand/summary with query (from, to, outcome?) - merchant-scoped via x-merchant-id; returns summary object per demand-events.md
+  - src/demand/demand-aggregates.service.spec.ts + test/database/demand-aggregates.integration.spec.ts - fixture-derived exact totals, isolation, small-cell suppression
+  - RBAC: demand:read permission key + seeding (ORC-approved, follow B10 pattern)
+read_set:
+  - src/demand/**, docs/contracts/demand-events.md, src/rbac/rbac.constants.ts, src/shop/dto/manage-shop.dto.ts (date pattern)
+write_set:
+  - src/demand/demand-aggregates.service.ts (new)
+  - src/demand/demand.controller.ts (new)
+  - src/demand/demand.module.ts (extend - controller + aggregates provider)
+  - src/demand/demand-aggregates.service.spec.ts (new)
+  - test/database/demand-aggregates.integration.spec.ts (new)
+  - "src/rbac/rbac.constants.ts (APPROVED by ORC - add demand:read key)"
+  - "src/rbac/rbac.service.ts (APPROVED by ORC - seed demand:read following existing pattern)"
+  - "src/app.module.ts (SERIALIZED ORC-approved - register DemandModule ONLY if not already registered; verify first)"
+protected_set:
+  - src/main.ts, src/auth/**, src/audit/**, src/observability/**, src/shop/**, src/commerce/**, src/ai/**, src/conversations/**, src/orchestrator/**
+  - prisma/schema.prisma + migrations (NO schema change - DemandEvent exists from B13)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+  - src/app.module.ts: ONLY the DemandModule import line if missing
+contracts:
+  - docs/contracts/demand-events.md (aggregation views, minimum threshold, privacy)
+constraints:
+  - Deterministic SQL only - totals must be exact and reproducible from fixtures; NO LLM involvement.
+  - Small-cell suppression: any attribute/region cell below threshold (default 5) is suppressed (not shown as zero - omitted).
+  - Merchant isolation at every query - cross-merchant returns empty/denied.
+  - Date range validated (from <= to, parseable) - deterministic error otherwise.
+  - No PII in responses - aggregates only.
+  - No new dependencies; no schema changes.
+implementation_notes: |-
+  - Use Prisma groupBy + $queryRaw for the heavier joins; follow existing analytics raw-SQL patterns in src/shop/shop.service.ts (analytics method) as reference.
+  - response shape: { range, volumeByCategory, matched, unmet, outOfStock, priceTooHigh, topAttributes, topSizes, topColors, trend: 'up'|'down'|'flat'|null } - trend only when sample size >= threshold.
+acceptance_criteria:
+  - AC-01: fixture-derived totals are exact (integration test compares known values).
+  - AC-02: date range filter works; invalid range rejected deterministically.
+  - AC-03: outcome filter (matched/unmet/out-of-stock/price-too-high) returns correct counts.
+  - AC-04: small-cell suppression - cells below threshold omitted, not zeroed.
+  - AC-05: merchant isolation - merchant B sees no merchant A data.
+  - AC-06: RBAC - demand:read required; 403 without it.
+  - AC-07: no protected changes beyond approved; no dependencies; suites green.
+tests_required:
+  - src/demand/demand-aggregates.service.spec.ts (unit - filters, suppression)
+  - test/database/demand-aggregates.integration.spec.ts (real DB - exact totals, isolation, suppression)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Aggregates service + controller + RBAC + tests; commands exit 0; evidence with exact totals and suppression read-backs.
+non_goals:
+  - No dashboard UI (F04); no predictive AI; no opportunity/revenue claims; no schema changes
+stop_conditions:
+  - Any need for schema change, ai/orchestrator/commerce changes, dependency addition, or unprotected RBAC seeding
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

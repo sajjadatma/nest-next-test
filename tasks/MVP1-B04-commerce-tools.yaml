@@ -1,0 +1,75 @@
+id: MVP1-B04
+title: "Remaining approved commerce tools (check_inventory, get_price, get_product_images, compare_products, get_shipping_estimate; get_customer_context deferred to B04b after B05)"
+goal: Implement the five read-only commerce tools on the B03 Golden Example pattern with strict schemas (contracts v1.1), merchant scoping, deterministic errors, audit, and tests. get_customer_context is explicitly deferred to task MVP1-B04b (requires B05 Customer persistence).
+why: These tools are the evidence-first surface the AI agent and channels will call (AC-01/02/04/05/12/14). Completing them before conversation/AI work keeps tool contracts stable.
+preconditions:
+  - MVP1-B03 DONE (Golden Example merged, QA PASS)
+  - Contracts v1.1 frozen (docs/contracts/commerce-tools.md includes exact B04 tool schemas; ORC-approved 2026-08-10)
+  - ORC resolution 2026-08-10: read boundary extension approved (compare_products multi-variant reads); shipping read port approved (src/commerce/shipping/); get_customer_context deferred to B04b
+inputs:
+  - src/commerce/commerce-tools.service.ts + contracts (B03 Golden Example)
+  - src/commerce/variants/** (B02)
+  - src/shop/shop.service.ts (READ ONLY reference: shipping options, quote logic)
+  - src/shop/dto/create-order.dto.ts (shipping method codes)
+  - docs/contracts/commerce-tools.md
+expected_output:
+  - Implementations of the six tools in src/commerce/commerce-tools.service.ts (or bounded sibling files per ORC convention)
+  - Contract additions in src/commerce/contracts/commerce-tool.contracts.ts (inputs/results for the six tools)
+  - Unit + database tests for each tool
+read_set:
+  - src/commerce/**, src/shop/shop.service.ts, src/shop/dto/create-order.dto.ts
+  - src/merchant/merchant.service.ts
+  - docs/contracts/commerce-tools.md, docs/product/PRODUCT.md AC-01/02/04/05/12/14
+write_set:
+  - src/commerce/commerce-tools.service.ts (extend with the five tools)
+  - src/commerce/contracts/commerce-tool.contracts.ts (extend with exact v1.1 schemas)
+  - src/commerce/commerce-tools.service.spec.ts (extend)
+  - test/database/commerce-tools.integration.spec.ts (extend with the five tools)
+  - "src/commerce/variants/variant.repository.ts (APPROVED by ORC - add findByProductIds(merchantId, productIds) for compare_products)"
+  - "src/commerce/variants/variant-read.service.ts (APPROVED by ORC - add compare(merchantId, productIds))"
+  - src/commerce/shipping/shipping-read.repository.ts (APPROVED by ORC - new read port querying ShippingMethod; no ShopService change)
+  - src/commerce/shipping/shipping-read.service.ts (APPROVED by ORC - available methods mapping)
+protected_set:
+  - src/main.ts, src/app.module.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**
+  - prisma/schema.prisma + migrations (NO schema change in this task - variants already exist)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+contracts:
+  - docs/contracts/commerce-tools.md (v1.1 exact schemas for the five B04 tools + result envelope + error codes)
+constraints:
+  - Follow the B03 Golden Example exactly: ToolResult envelope, deterministic error codes, merchant scoping, audit event per call, 'at' timestamp.
+  - check_inventory: variant-level stock/availability; distinguishes out-of-stock from absent variant (VARIANT_NOT_FOUND).
+  - get_price: returns current priceMinor + currency + updatedAt; unverifiable -> PRICE_UNVERIFIABLE.
+  - get_product_images: returns ordered images from ProductImage; empty gallery is valid.
+  - compare_products: 2..4 productIds, side-by-side variant rows with verified fields only; no fabricated comparison text; uses findByProductIds on the variant read model.
+  - get_shipping_estimate: uses the new commerce shipping read port (src/commerce/shipping/) over ShippingMethod; no order creation; SHIPPING_UNVERIFIABLE on failure; NO changes to ShopService/ShopModule.
+  - get_customer_context is NOT part of this task (deferred to MVP1-B04b after B05).
+  - No schema changes; no new dependencies; no HTTP controllers.
+implementation_notes: |-
+  - Extend the existing service rather than creating parallel files; keep one tool per method with shared validation helper.
+  - Unit tests mock the repositories; integration tests run against fresh testcontainers DB with Persian/English fixtures.
+  - Reuse variant-read model from B02; do not duplicate query logic.
+  - Shipping read port: new repository queries ShippingMethod (isActive) and maps to { id, label, description, eta, priceMinor }; facade get_shipping_estimate delegates to it.
+acceptance_criteria:
+  - AC-01: each tool returns ToolResult-shaped verified data; 'at' timestamp present; audit event emitted.
+  - AC-02: deterministic error codes for not-found, out-of-stock, unverifiable, unauthorized, merchant-mismatch.
+  - AC-03: cross-merchant access returns scoped failure (never another merchant's data).
+  - AC-04: compare_products handles 2..4 products and rejects invalid input (INVALID_INPUT).
+  - AC-05: get_shipping_estimate uses current ShippingMethod data via the shipping read port; no stock reservation or order side effects; ShopService untouched.
+  - AC-06: no protected changes; no schema change; no dependency changes; existing suites green.
+tests_required:
+  - Extend unit + database specs; full regression test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Five tools implemented on Golden Example pattern with tests; all commands exit 0; evidence read-backs reported.
+non_goals:
+  - No get_customer_context (task MVP1-B04b)
+  - No cart/checkout/handoff/demand tools (later tasks B09/B10/B13)
+  - No HTTP controllers; no AI gateway; no schema changes; no ShopService/ShopModule changes
+stop_conditions:
+  - Any need to change schema, protected files, contracts beyond additions, or add dependencies
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

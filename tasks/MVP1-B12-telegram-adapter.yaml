@@ -1,0 +1,81 @@
+id: MVP1-B12
+title: Telegram webhook adapter (primary external channel)
+goal: Implement the Telegram Bot adapter on the B11 boundary - webhook verification (secret token), update/message idempotency, normalization of text/button/postback to NormalizedInboundMessage, outbound text/buttons/product links via supported primitives, retryable delivery, and full tests with a fake Telegram client. Live credentials are NOT required (channel runs when credentials are provided).
+why: AC-08/09/13/14 require one real external channel on the same normalized pipeline as web; Telegram has the strongest local testability.
+preconditions:
+  - MVP1-B11 DONE (channel boundary + registry + replay harness, QA PASS)
+  - Contracts v1 frozen (messages.md + ADR-002)
+  - ORC approval for env additions (TELEGRAM_BOT_TOKEN optional, TELEGRAM_WEBHOOK_SECRET optional) - config-only, no credentials committed
+inputs:
+  - src/channels/channel.types.ts + channel-registry.service.ts (B11)
+  - src/orchestrator/orchestrator.service.ts (B08 - neutral entry)
+  - docs/contracts/messages.md, ADR-002
+  - src/config/env.validation.ts (READ ONLY reference - env additions need ORC-approved config task)
+expected_output:
+  - src/channels/telegram/telegram.adapter.ts - implements ChannelAdapter - verify (webhook secret token + update shape), normalize (text/button/postback to NormalizedInboundMessage with channel telegram, external ids), format (CommerceResponse to Telegram primitives - text, inline buttons, product links), deliver (sendMessage via a TelegramClient port with retry)
+  - src/channels/telegram/telegram-client.port.ts - minimal port interface (sendMessage, sendButtons) + FakeTelegramClient for tests
+  - src/channels/telegram/telegram.module.ts - wires adapter + fake/real client based on env presence
+  - src/channels/telegram/telegram.controller.ts - POST webhook endpoint - verify, normalize, registry, orchestrator, format, deliver; GET webhook for setup info (no secrets)
+  - Integration tests with FakeTelegramClient - authorized webhook, duplicate update replay, malformed payload, outbound text/buttons, delivery failure retry semantics, merchant isolation
+read_set:
+  - src/channels/**, src/orchestrator/orchestrator.service.ts, docs/contracts/messages.md, ADR-002
+  - src/config/env.validation.ts (read-only), src/rbac/ (not needed for public webhook)
+write_set:
+  - src/channels/telegram/telegram.adapter.ts (new)
+  - src/channels/telegram/telegram-client.port.ts (new)
+  - src/channels/telegram/fake-telegram-client.ts (new - test double, deterministic)
+  - src/channels/telegram/telegram.module.ts (new)
+  - src/channels/telegram/telegram.controller.ts (new)
+  - src/channels/telegram/telegram.controller.spec.ts (new unit/integration tests)
+  - test/integration/telegram.spec.ts (new - through real orchestrator + DB with fake client)
+  - src/config/env.validation.ts (ORC-APPROVED - add optional TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET; optional means no dev breakage)
+  - "src/orchestrator/orchestrator.service.ts (APPROVED by ORC 2026-08-10 - add channel-neutral ingress handleChannelMessage(normalized, correlationId) that preserves channel from NormalizedInboundMessage; existing handleWebMessage delegates to it; no behavior change to web path)"
+  - "src/orchestrator/orchestrator.module.ts (APPROVED by ORC 2026-08-10 - export OrchestratorService if not already exported for TelegramModule DI)"
+protected_set:
+  - src/main.ts, src/app.module.ts (registration in ORC-serialized step), src/auth/**, src/rbac/**, src/audit/**, src/observability/**, src/shop/**, src/commerce/**, src/ai/**, src/conversations/**
+  - src/orchestrator/** EXCEPT the two ORC-approved files (orchestrator.service.ts handleChannelMessage addition + orchestrator.module.ts export)
+  - prisma/schema.prisma + migrations (NO schema change)
+  - package*.json, docker-compose.yml, .env (never commit credentials), dashboard/**
+contracts:
+  - docs/contracts/messages.md (exact NormalizedInboundMessage + CommerceResponse)
+  - ADR-002 (adapter rules)
+constraints:
+  - Adapter contains NO commerce/AI logic - only Telegram payload translation + delivery.
+  - Webhook verification MUST happen before any processing; unverified requests rejected with 401/403 and no side effects.
+  - Idempotency - duplicate update_id/externalMessageId produces no duplicate messages/replies (unique constraint + early return).
+  - HTTP evidence (200/401/400) is produced through an isolated TelegramModule test application (Test.createTestingModule importing TelegramModule + required modules) - src/app.module.ts stays protected; production registration happens in a later ORC-serialized step.
+  - No secrets in code/tests/logs; fake client for all tests; real token only from env at runtime.
+  - Message primitives - text, inline keyboard buttons (quick replies), product links - no arbitrary UI assumptions.
+  - No new dependencies (use fetch or existing http client; no telegraf SDK without ORC approval).
+  - Delivery retry - at most one retry with backoff; failure returns ChannelDeliveryResult error; no double side effects on retry.
+implementation_notes: |-
+  - Telegram update shape - { update_id, message: { message_id, from: { id, username? }, text?, ... } } - map to NormalizedInboundMessage (externalMessageId = update_id or message_id based on idempotency contract; document choice).
+  - Postback/button - use callback_query or message with payload - map payload to text intent per contract.
+  - Webhook secret verification - compare x-telegram-bot-api-secret-token or query secret against TELEGRAM_WEBHOOK_SECRET (constant-time).
+acceptance_criteria:
+  - AC-01: verified text update to normalized to orchestrator to formatted outbound to fake client receives one message; 200 response.
+  - AC-02: unverified request to 401/403, zero side effects (no message persisted, no delivery).
+  - AC-03: duplicate update replay to one message, one reply (idempotency evidence).
+  - AC-04: malformed payload to deterministic rejection (400) without crash.
+  - AC-05: outbound product links/buttons format per contract; delivery failure returns error code with at-most-one retry, no double side effects.
+  - AC-06: merchant isolation preserved (header/merchant mapping as B10).
+  - AC-07: no protected changes beyond env.validation additions; no dependencies; suites green.
+tests_required:
+  - src/channels/telegram/telegram.controller.spec.ts (unit - verify/normalize/format/deliver)
+  - test/integration/telegram.spec.ts (fake client + real orchestrator + DB)
+  - Full regression - test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:integration
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Adapter + controller + fake client + tests; commands exit 0; evidence with 200/401/400 read-backs and duplicate-replay idempotency.
+non_goals:
+  - No real bot token integration without explicit credential authorization (separate go-live step)
+  - No Instagram/WhatsApp; no payment in channel; no schema changes
+stop_conditions:
+  - Any change to orchestrator/conversations/ai/shop internals; dependency addition without ORC approval; credential handling outside env
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

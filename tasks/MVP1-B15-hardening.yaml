@@ -1,0 +1,73 @@
+id: MVP1-B15
+title: Retention, observability, and failure-safety hardening
+goal: Implement the production-hardening slice - retention/deletion controls for conversations and demand events, redaction-aware observability/audit for AI and channel paths, health/readiness coverage, and fail-closed verification of delivery retries and rate/abuse controls - without changing protected core modules.
+why: AC-13/14/15 - production-oriented MVP1 requires documented retention behavior, observable channel/AI paths, and proven failure safety before the final release gate.
+preconditions:
+  - MVP1-F05 DONE (channel status UI, QA PASS) - all feature waves complete
+  - ORC review of current audit/log/health/rate-limit surface; contracts v1 frozen
+  - Human decision on retention periods is REQUIRED for production launch but NOT for local implementation - config-driven defaults with explicit documentation (blocker recorded for release, not for code)
+inputs:
+  - src/audit/audit.service.ts, src/system-logs/system-log.service.ts, src/health/health.controller.ts (current surface - READ ONLY)
+  - src/conversations/**, src/demand/**, src/channels/** (current behavior)
+  - src/config/runtime-config.service.ts + env.validation.ts (config patterns)
+  - docs/contracts/demand-events.md (retention section), PRODUCT.md AC-13/14
+expected_output:
+  - src/demand/demand-retention.service.ts - deleteDemandOlderThan + purgeUnlinkedRawData (no raw payloads exist; prove it) - used by an admin-gated endpoint
+  - src/conversations/conversation-retention.service.ts - deleteConversationsOlderThan with merchant scoping (or documented safe no-op until human retention decision with config-driven env switch)
+  - Config - RETENTION_DAYS (default 0 = disabled until human decision), validated in env.validation.ts (ORC-approved)
+  - Admin endpoints (permission-gated) - POST /api/admin/retention/demand, POST /api/admin/retention/conversations - dry-run + execute modes returning row counts
+  - Observability - audit events for AI tool calls already exist (B03+) - verify and add missing - channel delivery retries (audit action channel.delivery_retried), retention executions
+  - Health - verify readiness covers DB (exists) - no change needed unless gap found
+  - Tests - retention dry-run/execute row counts, merchant isolation, audit events for retention + channel retry, no raw payload storage proof
+read_set:
+  - src/audit/**, src/system-logs/**, src/health/**, src/conversations/**, src/demand/**, src/channels/**, src/config/**
+  - docs/contracts/demand-events.md, docs/product/PRODUCT.md AC-13/14
+write_set:
+  - src/demand/demand-retention.service.ts (new)
+  - src/conversations/conversation-retention.service.ts (new)
+  - src/config/env.validation.ts (RETENTION_DAYS optional - ORC-approved)
+  - src/admin/admin.controller.ts (extend - retention endpoints, ORC-approved) OR new src/admin/retention.controller.ts (new)
+  - src/admin/retention.module.ts (new if controller new)
+  - src/channels/channel-registry.service.ts (extend - delivery retry audit hook if needed, ORC-approved)
+  - test/database/retention.integration.spec.ts (new)
+  - test/integration/retention.spec.ts (new - endpoints, RBAC, audit)
+protected_set:
+  - src/main.ts, src/auth/**, src/rbac/**, src/observability/**, src/shop/**, src/commerce/**, src/ai/**, src/orchestrator/**, src/app.module.ts (registration via ORC-serialized step)
+  - prisma/schema.prisma + migrations (NO schema change)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+contracts:
+  - docs/contracts/demand-events.md (retention semantics), PRODUCT.md AC-13/14
+constraints:
+  - Retention DISABLED by default (RETENTION_DAYS=0) until human/legal decision - documented release blocker, not code blocker.
+  - Dry-run mode returns projected row counts without deleting; execute mode deletes within merchant scope (or all merchants for admin).
+  - No raw provider payload storage exists (B05) - retention service proves this in tests rather than adding storage.
+  - No schema changes; no new dependencies; no changes to core AI/orchestrator/shop logic.
+  - Audit every retention execution and channel delivery retry with actor/correlation.
+implementation_notes: |-
+  - Admin endpoints follow existing admin controller patterns (JwtAuthGuard + PermissionsGuard + existing shop:manage or new permission per ORC).
+  - RETENTION_DAYS validated as non-negative integer; 0 = disabled.
+acceptance_criteria:
+  - AC-01: dry-run returns projected counts without deleting (verifiable row counts unchanged).
+  - AC-02: execute mode deletes only records older than cutoff within scope; merchant isolation preserved.
+  - AC-03: retention disabled by default (RETENTION_DAYS=0) - execute without config returns 400/disabled message.
+  - AC-04: audit events recorded for retention executions and channel delivery retries.
+  - AC-05: no raw payload storage proven (inspection test); no PII in retention logs.
+  - AC-06: readiness/health unchanged and green.
+  - AC-07: no protected changes beyond approved; no dependencies; suites green.
+tests_required:
+  - test/database/retention.integration.spec.ts + test/integration/retention.spec.ts
+  - Full regression - test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:integration
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Retention services + endpoints + config + audit hooks + tests; commands exit 0; evidence with dry-run/execute row counts, audit rows, no-raw-payload proof.
+non_goals:
+  - No legal policy authoring (human decision); no schema changes; no payment/infra changes; no dashboard changes
+stop_conditions:
+  - Any change to ai/orchestrator/shop internals, auth guards, schema, or dependencies
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

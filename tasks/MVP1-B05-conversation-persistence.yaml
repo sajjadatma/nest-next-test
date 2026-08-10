@@ -1,0 +1,80 @@
+id: MVP1-B05
+title: Conversation persistence and normalized inbound idempotency
+goal: Persist Customer, CustomerChannelIdentity, Conversation, and Message entities with replay-safe normalized inbound idempotency, conservative identity linking, and no raw provider payload storage by default.
+why: AC-08/09/12/13 require channel-agnostic conversation state, duplicate-safe ingestion, and privacy-safe persistence before any AI or channel work.
+preconditions:
+  - MVP1-B04 DONE (all commerce tools merged, QA PASS)
+  - Contracts v1 frozen (docs/contracts/messages.md)
+  - PD-06 approved (Customer + CustomerChannelIdentity; verified linking only)
+inputs:
+  - prisma/schema.prisma (with Merchant + ProductVariant from B01/B02)
+  - docs/contracts/messages.md (NormalizedInboundMessage, idempotency rules)
+  - src/merchant/merchant.service.ts
+  - src/prisma/prisma.service.ts
+expected_output:
+  - Prisma models: Customer, CustomerChannelIdentity, Conversation, Message
+  - One new migration (additive; no data backfill required beyond defaults)
+  - src/conversations/conversation.service.ts with:
+    - normalizeAndPersist(normalized) - idempotent ingest
+    - resolveCustomer (external identity to customer; no auto-merge of profiles)
+    - conversation lookup/create scoped by merchant
+  - Database tests: duplicate replay, malformed message, merchant isolation, no raw payload column
+read_set:
+  - prisma/schema.prisma, docs/contracts/messages.md
+  - src/merchant/merchant.service.ts, src/prisma/prisma.service.ts
+  - docs/architecture/SYSTEM.md (module boundaries), docs/governance/ENGINEERING.md
+write_set:
+  - prisma/schema.prisma (add Customer, CustomerChannelIdentity, Conversation, Message)
+  - prisma/migrations/<new-timestamp>_conversation_persistence/migration.sql
+  - src/conversations/conversation.module.ts
+  - src/conversations/conversation.service.ts
+  - src/conversations/conversation.types.ts (contract types mirroring messages.md)
+  - test/database/conversation.integration.spec.ts
+protected_set:
+  - src/main.ts, src/app.module.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**
+  - src/shop/**, src/commerce/** (no modification)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+  - Existing migrations (new file only)
+contracts:
+  - docs/contracts/messages.md (exact NormalizedInboundMessage shape, idempotency: merchantId+channel+externalMessageId unique)
+  - docs/product/PRODUCT.md PD-06 (conservative identity linking), AC-08/09/12/13
+constraints:
+  - Idempotency: unique constraint on (merchantId, channel, externalMessageId); replay returns the existing message/conversation, creates nothing.
+  - Raw provider payload is NOT persisted: normalized fields only (text kept, payload dropped or reduced to approved metadata).
+  - Customer resolution: CustomerChannelIdentity maps externalUserId+channel to a Customer; never merge two Customer profiles automatically; linking to existing User requires a verified method (not implemented in this task beyond nullable user link).
+  - Conversation: one per (merchantId, customerId or anonymous external identity); status field defaults ACTIVE.
+  - No HTTP controller in this task; service-level only.
+  - No new dependencies.
+implementation_notes: |-
+  - Suggested models (confirm against current schema):
+    model Customer { id String @id @default(cuid()); merchantId String; userId String?; createdAt DateTime @default(now()); updatedAt DateTime @updatedAt; channelIdentities CustomerChannelIdentity[]; conversations Conversation[]; @@index([merchantId]) }
+    model CustomerChannelIdentity { id String @id @default(cuid()); customerId String; channel String; externalUserId String; externalHandle String?; lastSeenAt DateTime @default(now()); @@unique([customerId, channel, externalUserId]) }
+    model Conversation { id String @id @default(cuid()); merchantId String; customerId String?; externalUserId String?; channel String; status String @default("ACTIVE"); owner String @default("AI"); createdAt DateTime @default(now()); updatedAt DateTime @updatedAt; messages Message[]; @@index([merchantId, updatedAt]) }
+    model Message { id String @id @default(cuid()); conversationId String; merchantId String; channel String; externalMessageId String?; direction String; type String; text String?; occurredAt DateTime; @@unique([merchantId, channel, externalMessageId]) }
+  - normalizeAndPersist returns { message, conversation, created } so callers can skip downstream work on replay.
+  - Merchant isolation tests must create a second merchant and prove no cross-read.
+acceptance_criteria:
+  - AC-01: same (merchantId, channel, externalMessageId) replayed twice - one Message row, same conversation, created=false second time.
+  - AC-02: raw provider payload fields are not persisted (no payload column; only approved metadata).
+  - AC-03: identity resolution creates one Customer per external identity; no profile merge.
+  - AC-04: conversations are scoped by merchant; second merchant cannot see first merchant's conversations.
+  - AC-05: malformed/missing required fields are rejected deterministically.
+  - AC-06: migration applies on fresh DB; existing data intact.
+  - AC-07: no protected files changed; no dependency changes; existing suites green.
+tests_required:
+  - test/database/conversation.integration.spec.ts (AC-01..AC-06)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run prisma:generate && npm run prisma:migrate:deploy
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Schema + migration + service + tests in write_set; commands exit 0; evidence with replay read-backs and isolation probes.
+non_goals:
+  - No AI/orchestrator integration (B06+); no HTTP controller; no channel adapters (B11+); no handoff state machine (B10)
+  - No raw payload retention policy implementation (B15)
+stop_conditions:
+  - Need to modify protected files, add dependencies, change contracts, or merge customer profiles automatically
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

@@ -35,6 +35,9 @@ model User {
   payments            Payment[]
   savedPaymentMethods SavedPaymentMethod[]
   deletionRequests    AccountDeletionRequest[]
+  memberships         MerchantMembership[]
+  conversationCustomers Customer[]
+  acceptedHandoffs    HumanHandoff[]            @relation("HumanHandoffAccepter")
 }
 
 model UserProfile {
@@ -141,6 +144,8 @@ model Category {
 
 model Product {
   id                 String              @id @default(cuid())
+  merchantId         String              @default("cm1v1defaultmerchant0000000")
+  defaultVariantId   String?             @unique
   name               String
   slug               String              @unique
   description        String
@@ -155,7 +160,10 @@ model Product {
   stockQty           Int                 @default(0)
   lowStockThreshold  Int                 @default(5)
   categoryId         String
+  merchant           Merchant            @relation(fields: [merchantId], references: [id], onDelete: Restrict)
   category           Category            @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  variants           ProductVariant[]    @relation("ProductVariants")
+  defaultVariant     ProductVariant?     @relation("DefaultProductVariant", fields: [defaultVariantId], references: [id], onDelete: SetNull)
   orderItems         OrderItem[]
   images             ProductImage[]
   favorites          Favorite[]
@@ -165,6 +173,246 @@ model Product {
   updatedAt          DateTime            @updatedAt
 
   @@index([categoryId, isActive])
+  @@index([merchantId, isActive])
+}
+
+model ProductVariant {
+  id                String   @id @default(cuid())
+  productId         String
+  sku               String   @unique
+  color             String?
+  size              String?
+  otherAttributes   Json?
+  priceMinor        Int
+  currency          String   @default("USD")
+  stockQty          Int      @default(0)
+  isDefault         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  product           Product  @relation("ProductVariants", fields: [productId], references: [id], onDelete: Cascade)
+  defaultForProduct Product? @relation("DefaultProductVariant")
+  cartItems         CartItem[]
+
+  @@index([productId, isDefault])
+}
+
+model Merchant {
+  id        String               @id @default(cuid())
+  slug      String               @unique
+  name      String
+  currency  String               @default("USD")
+  isActive  Boolean              @default(true)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+  members   MerchantMembership[]
+  products  Product[]
+  customers Customer[]
+  customerChannelIdentities CustomerChannelIdentity[]
+  conversations Conversation[]
+  messages Message[]
+  carts    Cart[]
+  handoffs HumanHandoff[]
+  demandEvents DemandEvent[]
+}
+
+model Customer {
+  id                String                    @id @default(cuid())
+  merchantId        String
+  userId            String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  merchant          Merchant                  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  user              User?                     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  channelIdentities CustomerChannelIdentity[]
+  conversations     Conversation[]
+  carts             Cart[]
+
+  @@index([merchantId])
+  @@index([userId])
+}
+
+model CustomerChannelIdentity {
+  id               String   @id @default(cuid())
+  merchantId       String
+  customerId       String
+  channel          String
+  externalUserId   String
+  externalHandle   String?
+  lastSeenAt       DateTime @default(now())
+  merchant         Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer         Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, channel, externalUserId])
+  @@index([customerId])
+}
+
+model Conversation {
+  id             String    @id @default(cuid())
+  merchantId     String
+  customerId     String?
+  externalUserId String?
+  channel        String
+  status         String    @default("ACTIVE")
+  owner          String    @default("AI")
+  referenceState Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  merchant       Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer       Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  messages       Message[]
+  carts          Cart[]
+  handoffs       HumanHandoff[]
+  demandEvents   DemandEvent[]
+
+  @@unique([merchantId, channel, customerId])
+  @@unique([merchantId, channel, externalUserId])
+  @@index([merchantId, updatedAt])
+}
+
+enum DemandOutcome {
+  UNKNOWN
+  MATCHED
+  NO_MATCH
+  OUT_OF_STOCK
+  PRICE_TOO_HIGH
+  VARIANT_UNAVAILABLE
+  HANDED_OFF
+  MATCHED_NOT_PURCHASED
+  PURCHASED
+  ABANDONED
+}
+
+model DemandEvent {
+  id                  String        @id @default(cuid())
+  merchantId          String
+  conversationId      String
+  intentKey           String
+  occurredAt          DateTime
+  channel             String
+  region              String?
+  category            String?
+  brand               String?
+  canonicalAttributes Json
+  size                String?
+  budgetMin           Int?
+  budgetMax           Int?
+  currency            String?
+  purchaseIntent      String?
+  confidence          Float?
+  matchedProductId    String?
+  outcome             DemandOutcome
+  failureReason       String?
+  privacyVersion      String
+  merchant            Merchant      @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  conversation        Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, conversationId, intentKey])
+  @@index([merchantId, occurredAt])
+}
+
+enum HumanHandoffStatus {
+  REQUESTED
+  ACCEPTED
+  RESOLVED
+  REJECTED
+}
+
+model HumanHandoff {
+  id           String             @id @default(cuid())
+  conversationId String
+  merchantId   String
+  reasonCode   String
+  status       HumanHandoffStatus @default(REQUESTED)
+  requestedAt  DateTime           @default(now())
+  acceptedById String?
+  resolvedAt   DateTime?
+  summary      Json
+  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  merchant     Merchant           @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  acceptedBy   User?              @relation("HumanHandoffAccepter", fields: [acceptedById], references: [id], onDelete: SetNull)
+
+  @@index([merchantId, status, requestedAt])
+  @@index([conversationId, status])
+}
+
+enum CartStatus {
+  ACTIVE
+  HANDED_OFF
+  CONVERTED
+  EXPIRED
+  ABANDONED
+}
+
+model Cart {
+  id                String        @id @default(cuid())
+  merchantId        String
+  customerId        String?
+  externalUserId    String?
+  conversationId    String?
+  status            CartStatus    @default(ACTIVE)
+  checkoutTokenHash String?
+  expiresAt         DateTime?
+  subtotalMinor     Int           @default(0)
+  currency          String        @default("USD")
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  merchant          Merchant      @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  customer          Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  conversation      Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  items             CartItem[]
+
+  @@index([merchantId, status, updatedAt])
+  @@index([customerId])
+  @@index([conversationId])
+}
+
+model CartItem {
+  id             String         @id @default(cuid())
+  cartId         String
+  variantId      String
+  quantity       Int
+  unitPriceMinor Int
+  currency       String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  cart           Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant        ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([cartId, variantId])
+  @@index([variantId])
+}
+
+model Message {
+  id                String       @id
+  conversationId    String
+  merchantId        String
+  channel           String
+  externalMessageId String
+  direction         String
+  type              String
+  text              String?
+  mediaUrl          String?
+  intent            Json?
+  occurredAt        DateTime
+  createdAt         DateTime     @default(now())
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  merchant          Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, channel, externalMessageId])
+  @@index([conversationId, occurredAt])
+}
+
+model MerchantMembership {
+  id         String   @id @default(cuid())
+  merchantId String
+  userId     String
+  role       String   @default("operator")
+  createdAt  DateTime @default(now())
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, userId])
+  @@index([userId])
 }
 
 model ProductImage {

@@ -1,0 +1,74 @@
+id: MVP1-B06
+title: Structured intent extraction and conversation reference state
+goal: Implement validated partial-intent extraction and deterministic conversation reference state (positional references, cheaper, color/size refinement, compare selections) using stable product/variant ids from conversation history.
+why: AC-02/03 require natural-language follow-ups to resolve against conversation state and product ids, not fuzzy text alone.
+preconditions:
+  - MVP1-B05 DONE (conversation persistence merged, QA PASS)
+  - Contracts v1 frozen (docs/contracts/messages.md StructuredIntent)
+inputs:
+  - src/conversations/conversation.service.ts + conversation.types.ts (B05)
+  - src/commerce/variants/variant-read.service.ts (B02)
+  - docs/contracts/messages.md (StructuredIntent schema)
+  - docs/product/PRODUCT.md AC-02/03
+expected_output:
+  - src/ai/contracts/intent.contracts.ts (StructuredIntent types mirroring messages.md)
+  - src/conversations/reference-state.service.ts: deterministic resolution of second/third, cheaper, white, size 42, compare these two against last tool result carousel in conversation state
+  - src/ai/intent-parser.service.ts: rule-based deterministic parser for Persian/English fixtures (no LLM required in this task; LLM may replace extraction later but the schema stays)
+  - Unit + database tests for reference resolution and partial intent
+read_set:
+  - src/conversations/**, src/commerce/variants/**, docs/contracts/messages.md
+  - docs/architecture/SYSTEM.md, docs/product/PRODUCT.md
+write_set:
+  - src/ai/contracts/intent.contracts.ts
+  - src/ai/intent-parser.service.ts
+  - src/ai/ai.module.ts (module wiring only; no provider integration yet)
+  - src/conversations/reference-state.service.ts
+  - src/ai/intent-parser.service.spec.ts
+  - test/database/reference-state.integration.spec.ts
+  - "prisma/schema.prisma (APPROVED by ORC 2026-08-10 - add Conversation.referenceState Json? and Message.intent Json?; both nullable additive columns)"
+  - "prisma/migrations/<new-timestamp>_conversation_intent_state/migration.sql (APPROVED by ORC - additive nullable JSON columns only)"
+  - "src/conversations/conversation.service.ts (APPROVED by ORC - persist/read referenceState on Conversation and intent on Message)"
+protected_set:
+  - src/main.ts, src/app.module.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**
+  - src/shop/**, src/commerce/commerce-tools.service.ts (no modification)
+  - prisma/schema.prisma + migrations (no schema change in this task)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+contracts:
+  - docs/contracts/messages.md (StructuredIntent: intent enum, attributes controlled vocabulary, missingInformation semantics)
+constraints:
+  - Reference resolution MUST use stored conversation state (last product carousel with stable ids), never fuzzy product-name matching.
+  - Cheaper keyword selects the lowest-price variant among the last carousel; ties broken deterministically by product id.
+  - Compare-the-second-and-third produces compare_products input with the two referenced product ids.
+  - Refinement (white, size 42) merges into the previous StructuredIntent attributes/size without losing prior fields.
+  - Parser is deterministic and offline (no LLM call); Persian and English fixtures included.
+  - ORC-APPROVED schema additions: Conversation.referenceState Json? (last carousel state, nullable) and Message.intent Json? (structured intent per message, nullable). Both additive; NO backfill required; existing rows unaffected.
+  - No new dependencies; no HTTP controllers.
+implementation_notes: |-
+  - Store the last tool-result carousel (productIds + variants + prices) in Conversation.referenceState (JSON, ORC-approved). StructuredIntent per message persists in Message.intent (JSON, ORC-approved). Update conversation.service.ts accordingly.
+  - reference-state.service.ts reads Conversation.referenceState, resolves references, and returns updated state; conversation.service persists it.
+  - StructuredIntent.missingInformation drives whether a clarifying question is asked.
+acceptance_criteria:
+  - AC-01: the-second-one or third resolves to the exact product id from the last carousel; invalid index - deterministic error.
+  - AC-02: cheaper selects the lowest verified price among carousel; tie-break stable.
+  - AC-03: refinement merges attributes/size into prior intent; no info loss.
+  - AC-04: compare-the-second-and-third yields exactly two referenced ids.
+  - AC-05: Persian and English fixtures both parse; partial intents report missingInformation correctly.
+  - AC-06: no schema change, no protected changes, no dependencies; existing suites green.
+tests_required:
+  - src/ai/intent-parser.service.spec.ts (parsers, refinements)
+  - test/database/reference-state.integration.spec.ts (positional + cheaper + compare with persisted conversation state)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Parser + reference-state service + tests; commands exit 0; evidence with fixture read-backs.
+non_goals:
+  - No LLM provider integration (B07); no orchestrator flow (B08); no HTTP endpoints
+  - No schema changes unless ORC approves a minimal state column
+stop_conditions:
+  - Any protected file need; dependency addition; contract divergence from messages.md
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

@@ -1,0 +1,71 @@
+id: MVP1-F03
+title: Operator conversation inbox and takeover UI
+goal: Build the merchant dashboard conversation inbox (list + filters), conversation detail with AI summary, human takeover and return-to-AI controls, and empty/loading/error/disabled states - following the F01 frontend Golden Example patterns.
+why: AC-07/12 require operators to review and take over conversations with a useful summary; B10 endpoints are the contract surface.
+preconditions:
+  - MVP1-B10 DONE (handoff endpoints + RBAC keys conversations:read, conversations:takeover, QA PASS)
+  - Frontend Golden Example (F01 assistant components) + dashboard admin patterns (dashboard/src/app/dashboard/shop/, ShopAdminNavigation) exist
+  - Repository facts: admin shop pages under dashboard/src/app/dashboard/shop/, shared navigation component shop-admin-navigation.tsx, DashboardClient renders shop sections, api() wrapper, RTL approach from F01
+inputs:
+  - dashboard/src/app/dashboard/shop/ (existing admin pages + navigation), shop-admin-types.ts, shop-admin-navigation.tsx, dashboard-client.tsx
+  - test/integration/handoff.spec.ts (endpoint shapes)
+  - docs/product/PRODUCT.md AC-07/12, section 12 states
+expected_output:
+  - dashboard/src/app/dashboard/shop/conversations/page.tsx (route)
+  - dashboard/src/components/conversations/conversation-inbox.tsx - list with status/owner filters (ALL, AI_ACTIVE, HANDOFF_REQUESTED, HUMAN_ACTIVE, CLOSED), pagination, merchant-scoped via x-merchant-id default
+  - dashboard/src/components/conversations/conversation-detail.tsx - messages timeline (normalized), AI summary card, intent summary, verified products, takeover button (HANDOFF_REQUESTED to HUMAN_ACTIVE), release-to-AI button, disabled states per permission (conversations:takeover)
+  - dashboard/src/components/conversations/conversation-types.ts
+  - dashboard/src/components/conversations/conversation-inbox.test.tsx + conversation-detail.test.tsx (MSW)
+  - Navigation: add Conversations entry to shop-admin-navigation (ORC-approved serialized edit)
+read_set:
+  - dashboard/src/app/dashboard/shop/**, dashboard/src/components/shop-admin-navigation.tsx, shop-admin-types.ts, dashboard-client.tsx, shop-types.ts, lib/api.ts
+  - test/integration/handoff.spec.ts, docs/product/PRODUCT.md AC-07/12
+write_set:
+  - dashboard/src/app/dashboard/shop/conversations/page.tsx (new)
+  - dashboard/src/components/conversations/conversation-inbox.tsx (new)
+  - dashboard/src/components/conversations/conversation-detail.tsx (new)
+  - dashboard/src/components/conversations/conversation-types.ts (new)
+  - dashboard/src/components/conversations/conversation-inbox.test.tsx (new)
+  - dashboard/src/components/conversations/conversation-detail.test.tsx (new)
+  - dashboard/src/components/shop-admin-navigation.tsx (SERIALIZED ORC-approved - add Conversations link + permission mapping)
+protected_set:
+  - src/** (backend untouched), dashboard/src/app/dashboard/shop/ existing pages (no edits), dashboard-client.tsx, shop-admin-types.ts, shop-types.ts, lib/api.ts, package*.json, next.config.ts
+  - shop-admin-navigation.tsx: ONLY the Conversations entry addition
+contracts:
+  - B10 endpoints (GET /api/conversations/handoffs, POST /api/conversations/:id/handoff/accept, POST /api/conversations/:id/handoff/release - read test/integration/handoff.spec.ts for exact shapes)
+  - docs/product/PRODUCT.md section 12 states
+constraints:
+  - Show ONLY what APIs return; takeover/release buttons call the B10 endpoints; optimistic update with rollback on error; disabled without conversations:takeover.
+  - Follow F01 Golden Example patterns (client components, api(), existing CSS classes, RTL-ready copy).
+  - No new dependencies; no backend changes; no changes to existing admin pages beyond navigation entry.
+  - Permission-aware: hide takeover actions when user lacks conversations:takeover; hide whole section without conversations:read.
+implementation_notes: |-
+  - Use existing admin page shell patterns (page.tsx delegates to a client component like other shop sections).
+  - Filters and pagination are client-side over the API list; status chips mirror Conversation.status.
+  - Detail view loads messages + summary via B10/B08 endpoints; render intent attributes as a compact card.
+  - Tests: list render + filter, empty state, takeover success + error rollback, release flow, permission-disabled buttons, loading state.
+acceptance_criteria:
+  - AC-01: inbox lists conversations with status/owner chips and filters work (ALL, AI_ACTIVE, HANDOFF_REQUESTED, HUMAN_ACTIVE).
+  - AC-02: empty state, loading state, and API error state render correctly.
+  - AC-03: detail shows normalized message timeline, AI summary, intent card, verified products (from API only).
+  - AC-04: takeover (accept) transitions HANDOFF_REQUESTED to HUMAN_ACTIVE; button disabled when permission missing (403 path shows error, not silent).
+  - AC-05: release-to-AI transitions back to AI_ACTIVE and re-enables the flow.
+  - AC-06: optimistic update rolls back on API error; no duplicate actions while pending.
+  - AC-07: navigation entry appears only with conversations:read; section pages render per existing admin shell.
+  - AC-08: no backend/protected changes beyond navigation entry; no new dependencies; suites green.
+tests_required:
+  - conversation-inbox.test.tsx + conversation-detail.test.tsx (AC-01..AC-06 with MSW)
+  - npm run test:frontend
+  - Full regression gate - test:preflight + test:database
+verification_commands:
+  - npm run test:frontend
+  - npm run typecheck
+  - npm run build
+definition_of_done:
+  - Inbox + detail + navigation entry + tests; commands exit 0; browser smoke of listing, takeover, release with real API.
+non_goals:
+  - No demand dashboard (F04); no channel status UI (F05); no design-system overhaul; no backend changes
+stop_conditions:
+  - Any backend change; existing admin page edits; dependency addition; API contract mismatch with B10
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

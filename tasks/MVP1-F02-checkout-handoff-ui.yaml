@@ -1,0 +1,63 @@
+id: MVP1-F02
+title: Checkout handoff continuation UI
+goal: Let the existing web checkout open a signed handoff token (from the chat checkout_link) - verify via GET /api/checkout/handoff/:token, load verified cart lines into the existing checkout flow, and recover safely with clear reasons for expiry/tamper/stock/price changes.
+why: AC-06/14 require a safe UI continuation path for the conversational checkout handoff; the existing /shop/checkout currently only supports the client-side bag.
+preconditions:
+  - MVP1-B09b DONE (GET /api/checkout/handoff/:token - returns cartId, items with current prices/availability, canCheckout, reason; QA PASS)
+  - Existing checkout flow - /shop/checkout page + CheckoutClient component + cart-store (Zustand, addProduct) + api() wrapper - all READ ONLY except allowed files
+inputs:
+  - dashboard/src/app/shop/checkout/page.tsx, dashboard/src/components/checkout-client.tsx, dashboard/src/stores/cart-store.ts, dashboard/src/components/cart-provider.tsx
+  - test/integration/checkout-handoff.spec.ts (API response shape)
+  - docs/contracts/commerce-tools.md (checkout link semantics)
+expected_output:
+  - dashboard/src/components/checkout-handoff-client.tsx - reads handoff token from URL; on mount calls GET /api/checkout/handoff/:token; if canCheckout=true maps items to CartLine (productId from response, current priceMinor/currency/stockQty/name/images) and adds them to the cart store once, then renders the existing CheckoutClient; if canCheckout=false renders a clear recovery screen with reason-specific copy (EXPIRED/INVALID/OUT_OF_STOCK/PRICE_CHANGED/EMPTY) and a Return to shop link; loading + error states
+  - dashboard/src/app/shop/checkout/page.tsx (thin edit - read searchParams and render HandoffClient wrapper when handoff token present, else CheckoutClient)
+  - dashboard/src/components/checkout-handoff-client.test.tsx (MSW tests)
+read_set:
+  - dashboard/src/app/shop/checkout/page.tsx, dashboard/src/components/checkout-client.tsx, cart-store.ts, cart-provider.tsx, shop-types.ts (CartLine shape), lib/api.ts
+  - test/integration/checkout-handoff.spec.ts, docs/contracts/commerce-tools.md
+write_set:
+  - dashboard/src/components/checkout-handoff-client.tsx (new)
+  - dashboard/src/components/checkout-handoff-client.test.tsx (new)
+  - dashboard/src/app/shop/checkout/page.tsx (MINIMAL edit - accept searchParams, delegate to handoff wrapper or existing client)
+protected_set:
+  - src/** (backend untouched), dashboard/src/components/checkout-client.tsx, cart-store.ts, cart-provider.tsx, shop-types.ts, lib/api.ts, package*.json, next.config.ts
+  - No new dependencies; no backend changes
+contracts:
+  - B09b API response - cartId, status, items (productId, variantId, name?, priceMinor, currency, availability, quantity, imageUrl?), expiresAt, canCheckout, reason? - items carry CURRENT verified values
+constraints:
+  - Client NEVER trusts snapshot values for order totals - it displays the verified current values from the API response and the existing checkout re-quotes at /shop/order-quote before order creation (existing behavior).
+  - Add-to-cart happens ONCE per token (guard with a ref/state flag); re-render must not duplicate lines.
+  - If canCheckout=false, do NOT seed the cart; show reason copy (Persian + English) and Return to shop.
+  - Follow existing patterns - client component, api() wrapper, existing CSS classes (reuse checkout-page/checkout-empty patterns); no design-system invention.
+  - RTL: reuse the existing assistant RTL detection approach for Persian copy.
+  - No new packages; no shared-component changes.
+implementation_notes: |-
+  - Use useSearchParams (Next 16 App Router) to read handoff token; wrap in Suspense boundary if required by Next static rendering.
+  - Map API items to CartLine - id=productId, name, priceMinor, currency, stockQty (from availability: IN_STOCK to stockQty max), images/imageUrl, quantity - then call addProduct once per item (or a single store set via direct store action if cleaner; keep within cart-store public API where possible).
+  - Reason copy - EXPIRED to link expired; INVALID to link invalid; OUT_OF_STOCK to item no longer available; PRICE_CHANGED to price updated review before ordering; EMPTY to cart is empty.
+  - Tests - valid token seeds cart and renders CheckoutClient; expired/invalid/out-of-stock/price-changed each render correct recovery copy; double render adds lines once; loading and error states.
+acceptance_criteria:
+  - AC-01: valid handoff URL seeds the existing checkout with verified current items (once) and CheckoutClient renders.
+  - AC-02: expired token shows expiry recovery copy; no cart seeding.
+  - AC-03: tampered/invalid token shows invalid-link copy.
+  - AC-04: out-of-stock or price-changed shows the specific reason copy; cart not seeded.
+  - AC-05: double render / re-navigation does not duplicate cart lines (idempotent seeding).
+  - AC-06: loading and API-error states render; Persian/RTL copy supported.
+  - AC-07: no backend/protected/shared-file changes; no new dependencies; frontend suite + full regression green.
+tests_required:
+  - dashboard/src/components/checkout-handoff-client.test.tsx (AC-01..AC-06 with MSW)
+  - npm run test:frontend
+  - Full regression gate Q11 - test:preflight + test:database
+verification_commands:
+  - npm run test:frontend
+  - npm run typecheck
+  - npm run build
+definition_of_done:
+  - Handoff client + page wiring + tests; commands exit 0; browser smoke of a real chat checkout_link opened at /shop/checkout with handoff token.
+non_goals:
+  - No backend changes; no changes to CheckoutClient internals; no payment changes; no admin inbox (F03)
+stop_conditions:
+  - Any backend change; shared-file change; dependency addition; API contract mismatch with B09b
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

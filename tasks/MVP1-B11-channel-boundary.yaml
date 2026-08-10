@@ -1,0 +1,73 @@
+id: MVP1-B11
+title: Generic channel adapter boundary and replay harness
+goal: Implement the channel-agnostic adapter boundary contract - verification-before-processing, normalized ingress (NormalizedInboundMessage), outbound formatter (CommerceResponse to channel primitives), retryable delivery result, correlation propagation, and a deterministic replay harness proving the same orchestrator path as web.
+why: AC-08/09/13/14 require channel adapters to be thin and interchangeable; B12 (Telegram) and future Instagram/WhatsApp depend on this frozen boundary. Web-only logic is prohibited.
+preconditions:
+  - MVP1-F03 DONE (inbox UI, QA PASS) - orchestrator + conversation + handoff live
+  - Contracts v1 frozen (messages.md NormalizedInboundMessage + CommerceResponse; ADR-002)
+  - Repository facts - OrchestratorModule (B08) exposes handleWebMessage; ConversationService.normalizeAndPersist exists
+inputs:
+  - docs/contracts/messages.md (inbound/outbound contracts), ADR-002
+  - src/orchestrator/orchestrator.service.ts + conversation.controller.ts (B08 - how web messages flow)
+  - src/conversations/conversation.service.ts (B05/B06)
+  - test/integration/conversation.spec.ts (idempotency evidence)
+expected_output:
+  - src/channels/channel.types.ts - ChannelAdapter interface (verify, normalize, format, deliver) + ChannelDeliveryResult + ChannelError codes (CHANNEL_VERIFICATION_FAILED, CHANNEL_PAYLOAD_INVALID, CHANNEL_DELIVERY_FAILED, CHANNEL_UNSUPPORTED)
+  - src/channels/channel-registry.service.ts - registry mapping channel name to adapter; unknown channel returns CHANNEL_UNSUPPORTED
+  - src/channels/replay/replay-harness.service.ts - deterministic harness - runs a NormalizedInboundMessage fixture set through the adapter boundary + orchestrator, asserts one-to-one message/response mapping, idempotent on replay
+  - src/channels/replay/replay-fixtures.ts - deterministic fixture set (Persian search, follow-up, no-match, out-of-stock, price-too-high, comparison, duplicate delivery, malformed payload, unauthorized merchant, stale data, delivery failure)
+  - Tests - contract tests for adapter interface; replay harness tests (same fixtures through boundary + orchestrator); delivery failure and retry semantics
+read_set:
+  - src/orchestrator/**, src/conversations/**, src/ai/agent.service.ts (READ ONLY), docs/contracts/messages.md, docs/architecture/ADR-002-channel-normalization.md
+write_set:
+  - src/channels/channel.types.ts (new)
+  - src/channels/channel-registry.service.ts (new)
+  - src/channels/channel-registry.module.ts (new)
+  - src/channels/replay/replay-harness.service.ts (new)
+  - src/channels/replay/replay-fixtures.ts (new)
+  - src/channels/replay/replay-harness.service.spec.ts (new unit tests)
+  - test/integration/channel-replay.spec.ts (new - harness through real orchestrator)
+protected_set:
+  - src/main.ts, src/app.module.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**, src/shop/**, src/commerce/**, src/ai/**, src/orchestrator/**, src/conversations/**
+  - prisma/schema.prisma + migrations (NO schema change)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+contracts:
+  - docs/contracts/messages.md (exact NormalizedInboundMessage + CommerceResponse union)
+  - ADR-002 (adapter boundary rules)
+constraints:
+  - Adapters MUST NOT contain commerce or AI logic - they only translate provider payloads to/from the internal contracts and call the orchestrator.
+  - Verification must happen BEFORE normalization/processing (interface method contract).
+  - Replay harness must be deterministic - same input to same output; duplicate delivery produces no duplicate messages/replies.
+  - Raw provider payloads are not persisted; normalized data only.
+  - No real channel integration in this task (B12 - Telegram); fake adapters in tests prove the boundary.
+  - No schema change; no new dependencies; no HTTP controllers.
+implementation_notes: |-
+  - ChannelAdapter interface: verify(raw, merchantId) returns ok/errorCode; normalize(raw, merchantId) returns NormalizedInboundMessage; format(response) returns channel primitive; deliver(outbound, target) returns ChannelDeliveryResult.
+  - Replay harness drives verify to normalize to registry route to orchestrator to format to deliver; asserts response mapping and idempotency.
+  - If OrchestratorService.handleWebMessage is web-specific in naming, the harness may call it for MVP1 with channel 'web' or a neutral entry point - do NOT modify orchestrator (protected); adapt in harness.
+acceptance_criteria:
+  - AC-01: adapter interface + registry compile; unknown channel returns CHANNEL_UNSUPPORTED.
+  - AC-02: verification failure stops processing (no normalization, no orchestration, no delivery).
+  - AC-03: replay harness runs the full fixture set deterministically (same results on repeat).
+  - AC-04: duplicate delivery of the same externalMessageId produces one message and one reply (idempotency evidence).
+  - AC-05: delivery failure returns ChannelDeliveryResult with error code; retry semantics documented in harness (no double side effects).
+  - AC-06: malformed payload and unauthorized merchant fixtures produce deterministic rejection.
+  - AC-07: no protected changes; no schema change; no dependencies; suites green.
+tests_required:
+  - src/channels/replay/replay-harness.service.spec.ts (unit)
+  - test/integration/channel-replay.spec.ts (real orchestrator + DB, full fixtures)
+  - Full regression - test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:integration
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Boundary + registry + replay harness + fixtures + tests; commands exit 0; evidence with fixture counts and idempotency read-backs.
+non_goals:
+  - No real Telegram/Instagram/WhatsApp integration (B12+); no web-specific business logic; no schema changes
+stop_conditions:
+  - Any change to orchestrator/conversations/ai internals; dependency addition; contract divergence from messages.md
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

@@ -1,0 +1,71 @@
+id: MVP1-F01
+title: Web chat customer Golden Example (Persian/RTL)
+goal: Build the accessible responsive web chat surface at /shop/assistant that talks to the B08 conversation API through the same normalized pipeline, with Persian/RTL and English direction, product carousel, quick replies, loading/error/empty/retry states, and keyboard usability. This is the Frontend Golden Example (SYSTEM.md section 7).
+why: AC-02/03/04/08 require a deterministic customer-facing chat harness before channel adapters; establishes the frontend pattern for all later dashboard work.
+preconditions:
+  - MVP1-B08 DONE (POST message endpoint + GET history + orchestrator, QA PASS)
+  - API contract: POST message endpoint returning CommerceResponse union; GET history merchant-scoped (per B08 implementation)
+  - Repository facts: pages under dashboard/src/app/shop/, shared ShopLayout with ShopHeader/ShopFooter/CartProvider, client components in dashboard/src/components/, axios api wrapper in dashboard/src/lib/api.ts, money helper in shop-types.ts, tests with vitest + @testing-library + MSW
+inputs:
+  - dashboard/src/app/shop/layout.tsx, dashboard/src/components/shop-chrome.tsx, shop-types.ts, lib/api.ts
+  - test/integration/conversation.spec.ts (API shape reference)
+  - docs/contracts/messages.md (CommerceResponse union: text, product_carousel, quick_replies, checkout_link, human_handoff)
+  - docs/product/PRODUCT.md AC-02/03/04/08, RTL requirement
+expected_output:
+  - dashboard/src/app/shop/assistant/page.tsx (route; renders AssistantChat client component)
+  - dashboard/src/components/assistant/assistant-chat.tsx (chat window: messages, input, send, states)
+  - dashboard/src/components/assistant/assistant-types.ts (ClientChatMessage, renderable CommerceResponse)
+  - dashboard/src/components/assistant/assistant-chat.test.tsx (component tests with MSW)
+  - RTL: html dir=rtl lang=fa when Persian detected; LTR default English; accessible labels in both
+read_set:
+  - dashboard/src/app/shop/**, dashboard/src/components/shop-chrome.tsx, shop-types.ts, lib/api.ts, cart-provider.tsx
+  - dashboard/src/test/server.ts (MSW handlers pattern), dashboard/src/test/setup.ts
+  - docs/contracts/messages.md, docs/product/PRODUCT.md
+write_set:
+  - dashboard/src/app/shop/assistant/page.tsx
+  - dashboard/src/components/assistant/assistant-chat.tsx
+  - dashboard/src/components/assistant/assistant-types.ts
+  - dashboard/src/components/assistant/assistant-chat.test.tsx
+protected_set:
+  - src/** (backend untouched), dashboard/src/app/shop/layout.tsx, shop-chrome.tsx, shop-types.ts, lib/api.ts, cart-provider.tsx, package*.json, next.config.ts
+  - No new dependencies - use existing axios api() wrapper and component patterns
+contracts:
+  - docs/contracts/messages.md (CommerceResponse union exactly; product_carousel items: productId, variantId, title, priceMinor, currency, availability, imageUrl, productUrl, attributes)
+  - API path and payload shape as implemented in B08 (read test/integration/conversation.spec.ts)
+  - "Exact B08 endpoint: POST /api/conversations/messages with header x-merchant-id (required, value 'default' for MVP1) and body { text, externalMessageId?, externalUserId? } - response { conversationId, messageId, reply: CommerceResponse }, status 201 (new) / 200 (idempotent replay). GET /api/conversations/:conversationId/messages with header x-merchant-id for history."
+constraints:
+  - Client renders ONLY what the API returns; never computes prices/stock; product cards link to existing /shop/products/[slug].
+  - Follow the existing dashboard patterns: client components, local state, existing CSS classes (do not invent a design system).
+  - RTL: when the user message is Persian (regex on Unicode Persian range) or a locale flag exists, set dir=rtl lang=fa on the chat container; keep labels bilingual where user-facing.
+  - States: loading (sending), error with retry, empty (welcome hint), success; disabled send while pending.
+  - Enter sends, Shift+Enter newline, focus management for messages; aria-live polite for assistant replies.
+  - No new packages; no backend changes; no changes to shared components.
+implementation_notes: |-
+  - Use api() from lib/api.ts (axios, refresh-aware) with POST; generate client-side conversationId (crypto.randomUUID) persisted in sessionStorage per merchant session; send externalMessageId = randomUUID per message for idempotent retries.
+  - CommerceResponse kinds render as: text - bubble; product_carousel - horizontal cards (image, title, price via money(), availability badge, link to product page); quick_replies - option buttons that send their label/id; checkout_link - anchor; human_handoff - notice bubble.
+  - Tests: MSW handlers for POST success carousel, POST error - retry, quick-reply flow, RTL dir assertion for Persian input, Enter behavior.
+acceptance_criteria:
+  - AC-01: user sends Persian text, receives product carousel rendered from API data (verified price/stock from server, no client computation).
+  - AC-02: follow-up message (Persian equivalent of the-second-one) is sent to the same conversationId; server-side reference state resolves; reply renders.
+  - AC-03: error state shows retry; retry resends with the SAME externalMessageId (idempotency) and does not duplicate the user bubble.
+  - AC-04: quick_replies render as buttons; clicking sends the mapped option.
+  - AC-05: Persian input sets dir=rtl lang=fa; English stays LTR; labels accessible.
+  - AC-06: Enter sends, Shift+Enter newline; focus returns to input after send; aria-live announces assistant reply.
+  - AC-07: empty state shows a welcome hint; loading state disables input; human_handoff renders a notice.
+  - AC-08: no backend/protected/shared-file changes; no new dependencies; frontend suite + full regression green.
+tests_required:
+  - dashboard/src/components/assistant/assistant-chat.test.tsx (AC-01..AC-07)
+  - npm run test:frontend
+  - Full regression: test:preflight + test:database (gate Q09)
+verification_commands:
+  - npm run test:frontend
+  - npm run typecheck
+  - npm run build
+definition_of_done:
+  - Chat route + components + tests; all commands exit 0; browser/manual smoke of Persian search flow with read-back of rendered carousel.
+non_goals:
+  - No checkout/cart integration yet (B09/F02); no admin inbox (F03); no channel adapters (B11/B12); no design-system overhaul
+stop_conditions:
+  - Any backend change; shared-file change; dependency addition; API contract mismatch with B08
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

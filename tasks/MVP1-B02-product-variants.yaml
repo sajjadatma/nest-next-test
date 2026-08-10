@@ -1,0 +1,95 @@
+id: MVP1-B02
+title: ProductVariant migration and commerce read model
+goal: Introduce first-class ProductVariant (SKU, canonical attributes, color/size, price/currency/stock), migrate every existing Product to one default variant, and add a compatibility read path so current product URLs and checkout keep working.
+why: AC-01/03/05/06 require per-variant truth (size/color/SKU/price/stock). A compatibility path preserves the existing shop experience while the new model becomes the source of truth.
+preconditions:
+  - MVP1-B01 DONE (Merchant foundation merged and QA PASS)
+  - Contracts v1 frozen (docs/contracts/commerce-tools.md, messages.md)
+  - PRODUCT-CONTRACT v1 PD-05 approved (first-class variants; default variant per product)
+inputs:
+  - prisma/schema.prisma (with Merchant from B01)
+  - src/shop/shop.service.ts (READ ONLY reference for publicProduct/publicProductInclude and order invariants)
+  - src/shop/dto/* (order DTOs reference productId)
+  - dashboard/src/components/shop-types.ts (frontend Product type - READ ONLY; do not modify in this task)
+  - docs/contracts/commerce-tools.md (variant fields in tool results)
+expected_output:
+  - Prisma: ProductVariant model + Product.defaultVariantId; migration with default-variant backfill per product
+  - A compatibility layer: existing shop read paths (catalog/productBySlug/order creation) still function with unchanged behavior using default variant values
+  - Variant repository/read model (src/commerce/variants) with exact/partial match helpers for color, size, attributes
+  - Database + unit tests: backfill counts, no-oversell regression, stale price/stock checks, variant search cases
+read_set:
+  - prisma/schema.prisma
+  - src/shop/shop.service.ts, src/shop/dto/create-order.dto.ts, src/shop/dto/manage-shop.dto.ts
+  - src/shop/catalog-data.ts
+  - test/database/postgres.integration.spec.ts (patterns)
+  - docs/architecture/SYSTEM.md, docs/contracts/commerce-tools.md
+write_set:
+  - prisma/schema.prisma (ProductVariant; Product.defaultVariantId + variant relation; merchantId already present)
+  - prisma/migrations/<new-timestamp>_product_variants/migration.sql
+  - src/commerce/variants/variant.repository.ts (new)
+  - src/commerce/variants/variant-read.service.ts (new)
+  - test/database/variant.integration.spec.ts (new)
+  - ORC-approved minimal compatibility edits inside src/shop ONLY if required to keep behavior identical; each such edit must be listed in deviations and pre-approved by ORC at dispatch
+protected_set:
+  - src/main.ts, src/app.module.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**
+  - Existing migrations (no edits; new file only)
+  - package*.json, docker-compose.yml, .env
+  - Existing order/stock reservation invariants (updateMany gte pattern) MUST remain semantically identical
+  - dashboard/** (frontend untouched in this task)
+contracts:
+  - docs/contracts/commerce-tools.md (variant truth, availability, error codes)
+  - docs/product/PRODUCT.md AC-01/05/06, PD-05
+constraints:
+  - Backfill: every existing Product gets exactly one default ProductVariant carrying its current priceMinor, currency, stockQty, SKU derived deterministically (e.g. slug-based, no collisions).
+  - Existing /api/shop endpoints must return identical payload shapes after migration (compatibility tests).
+  - No new dependencies. No UI changes. No checkout behavior change.
+  - Variant availability = stockQty greater than 0 mapped to availability state per commerce-tools contract.
+  - Stale price/stock: reads happen at call time; tests must prove a variant price change is reflected immediately.
+implementation_notes: |-
+  - Suggested Prisma model (confirm against current schema before writing):
+
+    model ProductVariant {
+      id              String   @id @default(cuid())
+      productId       String
+      sku             String   @unique
+      color           String?
+      size            String?
+      otherAttributes Json?    // canonical attributes map
+      priceMinor      Int
+      currency        String   @default("USD")
+      stockQty        Int      @default(0)
+      isDefault       Boolean  @default(false)
+      updatedAt       DateTime @updatedAt
+      product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+      @@index([productId, isDefault])
+    }
+
+  - Product gains: variants ProductVariant[], defaultVariantId String? (nullable during migration, then backfilled; decide NOT NULL only if all rows covered).
+  - Backfill SQL in migration: insert one variant per product using product fields; set Product.defaultVariantId.
+  - Compatibility: existing shop service reads keep using product.priceMinor/stockQty (still present). The read model additionally exposes variant-first lookups for the future tool layer. Do NOT delete Product.priceMinor/stockQty columns in this migration (keeps existing code green); variant becomes the authoritative source for NEW tool paths.
+acceptance_criteria:
+  - AC-01: fresh-DB migration applies; every product has exactly one default variant; counts match.
+  - AC-02: existing catalog/product-by-slug/order endpoints return identical behavior and payload shape (integration regression).
+  - AC-03: variant search by color/size/attributes returns deterministic results; no-match and out-of-stock are distinguishable.
+  - AC-04: price/stock changes on a variant are visible immediately (stale-data test).
+  - AC-05: order creation still prevents overselling using stock at call time (existing concurrency test still passes).
+  - AC-06: no protected files changed; no dependency changes; SKU unique enforced.
+tests_required:
+  - test/database/variant.integration.spec.ts (backfill, search, stale-data, uniqueness)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run prisma:generate && npm run prisma:migrate:deploy
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Migration + schema + read model + tests inside write_set; commands exit 0; evidence with row counts and endpoint read-backs.
+non_goals:
+  - No frontend changes; no variant admin UI; no tool facade endpoints yet (MVP1-B03)
+  - No changes to order DTO shape
+  - No deleting Product.priceMinor/stockQty
+stop_conditions:
+  - Any protected file requirement; dependency addition; behavior change to existing endpoints beyond ORC-approved compatibility edits; schema conflict with B01
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

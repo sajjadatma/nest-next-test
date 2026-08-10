@@ -1,0 +1,65 @@
+id: MVP1-B12b
+title: Channel status read API
+goal: Implement permission-gated, merchant-scoped GET /api/channels/status returning per-channel { id, label, configured, healthy, lastEventAt?, error? } with NO secrets, enabling the F05 status UI.
+why: F05 (channel status UI) is blocked until this endpoint exists; merchant operators need a safe connectivity view (PRODUCT.md section 12).
+preconditions:
+  - MVP1-B12 DONE (Telegram adapter + registry live, QA PASS)
+  - B11 channel registry (src/channels/channel-registry.service.ts) exposes adapter list
+  - ORC approval for channels:read RBAC key + seeding (follow B10/B14 pattern)
+inputs:
+  - src/channels/channel-registry.service.ts, src/channels/telegram/telegram.module.ts (env presence), src/channels/channel.types.ts
+  - src/rbac/rbac.constants.ts + rbac.service.ts (permission pattern), src/auth/jwt-auth.guard.ts
+  - test/integration/telegram.spec.ts (what channel info exists)
+expected_output:
+  - src/channels/channel-status.controller.ts - GET /api/channels/status - JwtAuthGuard + PermissionsGuard + channels:read; returns [{ id, label, configured, healthy, lastEventAt?, error? }] per registered adapter; configured = env presence (e.g. TELEGRAM_BOT_TOKEN), healthy = configured && last known verification/delivery success (registry or null); error = safe non-secret message
+  - src/channels/channel-status.module.ts or extend telegram/channel module wiring (ORC-approved)
+  - src/rbac/rbac.constants.ts (channels:read key - ORC-approved) + rbac.service.ts seeding
+  - src/app.module.ts (SERIALIZED ORC-approved - register ChannelStatus module ONLY if not already registered; verify first)
+  - test/integration/channel-status.spec.ts - 200 with configured/healthy flags, 403 without permission, merchant header required
+read_set:
+  - src/channels/**, src/rbac/rbac.constants.ts, src/rbac/rbac.service.ts, src/auth/jwt-auth.guard.ts
+write_set:
+  - src/channels/channel-status.controller.ts (new)
+  - src/channels/channel-status.module.ts (new)
+  - "src/channels/channel-registry.service.ts (APPROVED by ORC 2026-08-10 - add read-only list(): readonly ChannelAdapter[] to expose registered adapters; nothing else)"
+  - src/rbac/rbac.constants.ts (add channels:read - ORC-approved)
+  - src/rbac/rbac.service.ts (seed channels:read - ORC-approved)
+  - "src/app.module.ts (SERIALIZED ORC-approved - ChannelStatus module import ONLY if not already registered; verify first)"
+  - test/integration/channel-status.spec.ts (new)
+protected_set:
+  - src/main.ts, src/auth/**, src/audit/**, src/observability/**, src/shop/**, src/commerce/**, src/ai/**, src/orchestrator/**, src/conversations/**, src/demand/**
+  - prisma/schema.prisma + migrations (NO schema change)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+  - src/app.module.ts: ONLY the ChannelStatus module import line if missing
+contracts:
+  - Response shape: Array<{ id, label, configured, healthy, lastEventAt?, error? }> - NO tokens/secrets ever
+constraints:
+  - NEVER return credentials/tokens; configured is boolean derived from env presence only.
+  - healthy reflects registry knowledge (last verification/delivery success); unknown = false with safe error.
+  - Merchant-scoped via x-merchant-id header (required); permission-gated channels:read.
+  - No schema change; no new dependencies.
+implementation_notes: |-
+  - Query registry adapters (B11); for each, derive configured from env presence; healthy from registry/delivery state if tracked, else configured-only with lastEventAt null.
+  - Follow B14 controller patterns (JwtAuthGuard + PermissionsGuard + RequirePermissions).
+acceptance_criteria:
+  - AC-01: GET /api/channels/status returns 200 with per-channel flags; telegram configured=false when env absent (tests).
+  - AC-02: 403 without channels:read permission.
+  - AC-03: missing x-merchant-id -> 400.
+  - AC-04: no credential values in any response field (inspection test).
+  - AC-05: no schema change; no dependencies; suites green.
+tests_required:
+  - test/integration/channel-status.spec.ts (AC-01..AC-04)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run test:integration
+  - npm run test:preflight
+  - npm run test:database
+  - npm run build
+definition_of_done:
+  - Controller + module + RBAC + tests; commands exit 0; HTTP read-backs (200/403/400) and no-secret inspection.
+non_goals:
+  - No credential management/editing; no schema changes; no dashboard changes (F05 follows)
+stop_conditions:
+  - Any secret exposure; schema change; dependency addition; protected changes beyond the stated import line
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

@@ -1,0 +1,110 @@
+id: MVP1-B01
+title: Merchant and membership foundation with default-merchant backfill
+goal: Introduce Merchant and MerchantMembership persistence, scope Product rows to a default merchant, and prove data-preserving migration with repository-level isolation tests.
+why: Every MVP1 domain (commerce tools, conversations, channels, demand) requires tenant scoping. AC-12 cannot be met without a merchant boundary; doing this first avoids redesigning every later schema.
+preconditions:
+  - Human approval of PLAN v0.1 + "use existing shop database" (done 2026-08-10)
+  - Product Contract v1 (docs/product/PRODUCT.md), ENGINEERING.md, SYSTEM.md, ADR-001, AGENTS.md (done)
+  - Baseline preflight (Q00) PASS recorded by ORC (2026-08-10: preflight exit 0, 20 integration tests passed)
+inputs:
+  - prisma/schema.prisma (current models incl. Product, User)
+  - prisma/migrations/ (existing 9 migrations)
+  - docs/architecture/SYSTEM.md section 5 protected files
+  - docs/governance/AGENTS.md result envelope
+expected_output:
+  - Prisma schema with Merchant + MerchantMembership + Product.merchantId
+  - One new migration under prisma/migrations/ that creates tables, creates default merchant, backfills Product.merchantId, then applies NOT NULL
+  - Merchant module (src/merchant/) with minimal ensure-default service + scoped read helpers
+  - Database tests proving backfill, isolation, and migration behavior
+read_set:
+  - prisma/schema.prisma
+  - prisma/migrations/*
+  - src/prisma/prisma.service.ts
+  - src/audit/audit.service.ts
+  - src/shop/shop.service.ts (READ ONLY - do not modify)
+  - docs/architecture/SYSTEM.md, docs/contracts/commerce-tools.md
+write_set:
+  - prisma/schema.prisma (add models Merchant, MerchantMembership; add merchantId to Product; add relation on User)
+  - prisma/migrations/<new-timestamp>_merchant_foundation/migration.sql (new file only)
+  - src/merchant/merchant.module.ts
+  - src/merchant/merchant.service.ts
+  - src/merchant/merchant.constants.ts (DEFAULT_MERCHANT_ID/slug)
+  - test/database/merchant.integration.spec.ts (new test file)
+protected_set:
+  - src/main.ts, src/app.module.ts, src/auth/**, src/rbac/**, src/audit/**, src/shop/** (no modifications)
+  - .env, package*.json, docker-compose.yml, existing migrations (no edits - new file only)
+contracts:
+  - docs/contracts/commerce-tools.md (merchant scoping rules)
+  - docs/product/PRODUCT.md section 10 (identity, isolation)
+constraints:
+  - Purely additive schema change plus backfill; existing rows must be preserved.
+  - Existing shop endpoints must keep working unchanged (no behavior change in this task).
+  - Do NOT add auth/RBAC endpoints yet (later task); the service exposes scoped read helpers only.
+  - Use exact Prisma conventions already present (cuid ids, createdAt/updatedAt, @@index patterns).
+  - New migration SQL must create tables, insert default merchant, backfill, then set NOT NULL + FK constraints.
+  - Do not modify package.json or add dependencies.
+implementation_notes: |-
+  - Suggested schema (follow existing conventions; confirm against current schema before writing):
+
+    model Merchant {
+      id        String   @id @default(cuid())
+      slug      String   @unique
+      name      String
+      currency  String   @default("USD")
+      isActive  Boolean  @default(true)
+      createdAt DateTime @default(now())
+      updatedAt DateTime @updatedAt
+      members   MerchantMembership[]
+      products  Product[]
+    }
+
+    model MerchantMembership {
+      id         String   @id @default(cuid())
+      merchantId String
+      userId     String
+      role       String   @default("operator")
+      createdAt  DateTime @default(now())
+      merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+      user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+      @@unique([merchantId, userId])
+      @@index([userId])
+    }
+
+  - Product: add merchantId String; relation merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Restrict)
+  - User: add memberships MerchantMembership[]
+  - DEFAULT_MERCHANT: slug "default", name "Default Merchant"; export DEFAULT_MERCHANT_ID constant from merchant.constants.ts,
+    used by ensureDefaultMerchant service method and by the migration backfill (keep ids consistent).
+  - MerchantService.ensureDefaultMerchant(): upsert by slug; idempotent.
+  - MerchantService helpers (read-only, no controller): findBySlug, isMember(userId, merchantId),
+    productsScoped(merchantId) - used by later tasks.
+  - Migration naming convention: <YYYYMMDDHHMMSS>_merchant_foundation
+acceptance_criteria:
+  - AC-01: Fresh DB migration applies cleanly; existing data preserved (products, users, orders intact).
+  - AC-02: Every existing Product row now belongs to the default merchant (count check before/after).
+  - AC-03: Product.merchantId is NOT NULL after migration.
+  - AC-04: Merchant/MerchantMembership tables exist with unique constraints (slug, merchantId+userId).
+  - AC-05: MerchantService.ensureDefaultMerchant is idempotent (run twice, one row).
+  - AC-06: isMember returns true only for granted memberships; productsScoped filters by merchantId.
+  - AC-07: No protected file modified; no dependency changes; existing tests still pass.
+tests_required:
+  - test/database/merchant.integration.spec.ts covering AC-01..AC-06 against a fresh testcontainers DB
+  - Full regression: npm run test:preflight (lint, typecheck, unit, frontend, integration) + test:database
+verification_commands:
+  - npm run prisma:generate
+  - npm run prisma:migrate:deploy
+  - npm run test:database (merchant spec + existing database specs)
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Migration + schema + service + tests written inside write_set; all commands pass with exit code 0; evidence read-backs reported (row counts, constraint names, test counts)
+non_goals:
+  - No HTTP endpoints/controllers (later task)
+  - No RBAC permission keys (later task)
+  - No ProductVariant changes (next task MVP1-B02)
+  - No changes to shop behavior or checkout
+stop_conditions:
+  - Any need to modify protected files, existing migrations, dependencies, or shop behavior
+  - Existing tests break for reasons outside this task
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

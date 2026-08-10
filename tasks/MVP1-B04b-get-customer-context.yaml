@@ -1,0 +1,60 @@
+id: MVP1-B04b
+title: get_customer_context commerce tool (after Customer persistence)
+goal: Implement get_customer_context on the B03 Golden Example pattern using the B05 Customer model, returning only the non-identifying merchant-scoped fields defined in contracts v1.1.
+why: Completes the approved tool registry (AC-12/13) while strictly respecting privacy - the tool needs Customer persistence from B05 to exist first.
+preconditions:
+  - MVP1-B05 DONE (Customer/CustomerChannelIdentity/Conversation/Message merged, QA PASS)
+  - Contracts v1.1 frozen (docs/contracts/commerce-tools.md B04 tool schemas - get_customer_context exact fields)
+inputs:
+  - src/conversations/conversation.service.ts (B05 - customer resolution)
+  - src/commerce/commerce-tools.service.ts (B03/B04 facade pattern)
+  - docs/contracts/commerce-tools.md (get_customer_context schema v1.1)
+expected_output:
+  - get_customer_context implementation in commerce-tools.service.ts
+  - Contract types for the tool
+  - Unit + database tests: permitted fields only, redacted PII never in result/logs, merchant isolation, CUSTOMER_NOT_FOUND
+read_set:
+  - src/commerce/**, src/conversations/**, src/merchant/merchant.service.ts
+  - docs/contracts/commerce-tools.md, docs/product/PRODUCT.md AC-12/13
+write_set:
+  - src/commerce/commerce-tools.service.ts (extend with get_customer_context)
+  - src/commerce/contracts/commerce-tool.contracts.ts (extend)
+  - src/commerce/commerce-tools.service.spec.ts (extend)
+  - test/database/commerce-tools.integration.spec.ts (extend)
+  - "src/conversations/conversation.service.ts (APPROVED by ORC - add merchant-scoped aggregate-only customer-context read: customerId, hasUserAccount, conversationCount, orderCount; NO PII)"
+  - "src/commerce/commerce.module.ts (APPROVED by ORC - import ConversationModule and inject the conversation read service)"
+protected_set:
+  - src/main.ts, src/app.module.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**, src/shop/**
+  - prisma/schema.prisma + migrations (NO schema change)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+contracts:
+  - docs/contracts/commerce-tools.md (get_customer_context: permitted customerId/hasUserAccount/conversationCount/orderCount; redacted email/phone/handles/addresses/text)
+constraints:
+  - Result contains ONLY: customerId, hasUserAccount, conversationCount, orderCount, at.
+  - Never return or log: email, phone, external handles, external user ids, raw addresses, conversation text, channel identities.
+  - Merchant scoping: customer must belong to the requesting merchant; else CUSTOMER_NOT_FOUND.
+  - No schema change; no new dependencies; no HTTP controllers.
+implementation_notes: |-
+  - Count conversations via B05 Conversation rows (merchantId + customerId); count orders via linked User orders when hasUserAccount, else 0.
+  - Follow the B03 Golden Example envelope and audit pattern.
+acceptance_criteria:
+  - AC-01: returns exactly the permitted fields; no PII in result.
+  - AC-02: cross-merchant customerId -> CUSTOMER_NOT_FOUND (isolation).
+  - AC-03: missing customer -> CUSTOMER_NOT_FOUND; invalid input -> INVALID_INPUT.
+  - AC-04: audit event emitted; no PII in audit metadata or logs.
+  - AC-05: no protected changes; no schema change; no dependencies; suites green.
+tests_required:
+  - Unit + database specs for the tool; full regression test:preflight + test:database
+verification_commands:
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Tool implemented with tests; commands exit 0; evidence read-backs including PII-absence inspection.
+non_goals:
+  - No other tools; no schema changes; no HTTP endpoints
+stop_conditions:
+  - Any need for schema change, protected files, dependencies, or contract divergence
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

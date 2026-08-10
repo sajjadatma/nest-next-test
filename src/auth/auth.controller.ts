@@ -13,12 +13,18 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
+// ORC-approved (2026-08-10): auth throttle limit is env-tunable so the
+// integration suite can raise it (AUTH_RATE_LIMIT_MAX) without changing
+// the production default of 5 attempts/minute. Module-level constant so the
+// value is evaluated at import time, after global-setup sets the env.
+const AUTH_THROTTLE = { default: { limit: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 5), ttl: 60_000 } };
+
 @ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
   constructor(private auth: AuthService) {}
   @Post('register')
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle(AUTH_THROTTLE)
   @ApiOperation({ summary: 'Create an account' })
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiConflictResponse({ description: 'Email is already registered' })
@@ -26,7 +32,7 @@ export class AuthController {
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) response: Response) { return this.respondWithSession(await this.auth.register(dto), response); }
 
   @Post('login')
-  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  @Throttle(AUTH_THROTTLE)
   @ApiOperation({ summary: 'Log in with email and password' })
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid email or password' })

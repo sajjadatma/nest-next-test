@@ -1,0 +1,76 @@
+id: MVP1-B13
+title: DemandEvent state machine and privacy-safe persistence
+goal: Implement the privacy-safe DemandEvent pipeline - create/update one qualified demand record per conversation intent (category, attributes, budget, intent, confidence, outcome, merchant, channel, time), with the outcome state machine, idempotent upsert, merchant isolation, and no unnecessary identity.
+why: AC-10/11/13 - the Demand Network foundation; deterministic aggregates (B14) and dashboard (F04) depend on correct, privacy-safe events.
+preconditions:
+  - MVP1-B12 DONE (Telegram adapter, QA PASS) - all channels flow through orchestrator
+  - Contracts v1 frozen (docs/contracts/demand-events.md - outcomes, schema, privacy invariants)
+  - Conversation/intent persistence live (B05/B06 - Message.intent, Conversation.referenceState)
+  - Repository facts - Prisma models exist (Message.intent Json), orchestrator emits structured outcome via agent
+inputs:
+  - docs/contracts/demand-events.md (outcome state machine, schema, aggregation thresholds)
+  - src/conversations/conversation.service.ts (Message.intent), src/ai/agent.service.ts (structured outcome emission - READ ONLY), src/orchestrator/orchestrator.service.ts (READ ONLY)
+  - prisma/schema.prisma (current models), src/prisma/prisma.service.ts
+expected_output:
+  - Prisma - DemandEvent model (per demand-events.md schema - id, merchantId, occurredAt, channel, region?, category?, brand?, canonicalAttributes Json, size?, budgetMin?, budgetMax?, currency?, purchaseIntent?, confidence?, matchedProductId?, outcome, failureReason?, privacyVersion) + unique idempotency key (merchantId + conversationId + intentKey) + one migration (additive)
+  - src/demand/demand.module.ts + demand.service.ts - recordOrUpdateDemand (upsert by idempotency key), outcome transition validation (UNKNOWN to MATCHED/NO_MATCH/...; MATCHED to MATCHED_NOT_PURCHASED/PURCHASED/ABANDONED/HANDED_OFF), merchant-scoped queries
+  - src/demand/demand.constants.ts (outcome enum, privacyVersion constant, default aggregation threshold)
+  - Orchestrator integration - when agent emits structured outcome, orchestrator calls demand service (orchestrator write-set extension per ORC if needed)
+  - Tests - outcome transition matrix, idempotent replay (no duplicates), merchant isolation, no PII in shared fields, deletion/privacy behavior
+read_set:
+  - docs/contracts/demand-events.md, src/orchestrator/orchestrator.service.ts, src/ai/agent.service.ts (READ ONLY)
+  - prisma/schema.prisma, src/conversations/conversation.service.ts
+write_set:
+  - prisma/schema.prisma (DemandEvent model + index)
+  - prisma/migrations/<new-timestamp>_demand_event/migration.sql (new, additive)
+  - src/demand/demand.module.ts (new)
+  - src/demand/demand.service.ts (new)
+  - src/demand/demand.constants.ts (new)
+  - src/demand/demand.service.spec.ts (new unit tests)
+  - "src/orchestrator/orchestrator.service.ts (APPROVED by ORC - call demand service on agent structured outcome; minimal edit)"
+  - "src/orchestrator/orchestrator.module.ts (APPROVED by ORC - import DemandModule for DI)"
+  - test/database/demand.integration.spec.ts (new)
+protected_set:
+  - src/main.ts, src/app.module.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**, src/shop/**, src/commerce/**, src/ai/**
+  - src/conversations/** (no modification)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+  - Existing migrations (new file only)
+contracts:
+  - docs/contracts/demand-events.md (exact outcomes, schema fields, privacy invariants, aggregation threshold default 5)
+constraints:
+  - Outcome state machine EXACTLY per demand-events.md; invalid transitions rejected.
+  - Idempotency key - (merchantId, conversationId, intentKey) - replay updates nothing new.
+  - NO PII in DemandEvent or aggregates - no customerId, externalUserId, phone, email, handle, raw text. privacyVersion = v1.
+  - Merchant isolation at every query; cross-merchant to empty/denied.
+  - Confidence stored internally but never exposed to customers; shared views use thresholds.
+  - No new dependencies; no raw payload storage.
+implementation_notes: |-
+  - intentKey - deterministic hash of (intent category + attributes + size + budget) from StructuredIntent; same request to same key to upsert updates outcome.
+  - Orchestrator edit - after agent returns structured outcome (record_demand_outcome compatible), call demandService.recordOrUpdateDemand with intent + outcome + merchantId + channel + occurredAt.
+  - Aggregation threshold constant exported for B14.
+acceptance_criteria:
+  - AC-01: qualified product request produces one DemandEvent with normalized fields (no unnecessary identity).
+  - AC-02: outcome transitions validated (invalid transition rejected, e.g. NO_MATCH to PURCHASED).
+  - AC-03: replay of same (merchantId, conversationId, intentKey) does not create duplicates.
+  - AC-04: merchant isolation - merchant B cannot read merchant A events.
+  - AC-05: no PII in stored fields or query output (inspection test).
+  - AC-06: channel + timestamp + merchantId recorded correctly.
+  - AC-07: no protected changes beyond approved orchestrator edit; no dependencies; suites green.
+tests_required:
+  - src/demand/demand.service.spec.ts (state machine, transitions)
+  - test/database/demand.integration.spec.ts (persistence, idempotency, isolation, PII absence)
+  - Full regression - test:preflight + test:database
+verification_commands:
+  - npm run prisma:generate && npm run prisma:migrate:deploy
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - DemandEvent model + service + orchestrator hook + tests; commands exit 0; evidence with transition read-backs and PII-absence inspection.
+non_goals:
+  - No aggregation queries/dashboard yet (B14/F04); no retention policy implementation (B15); no raw payload storage
+stop_conditions:
+  - Any change to ai/commerce/shop internals, conversations, or protected files beyond the approved orchestrator edit
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

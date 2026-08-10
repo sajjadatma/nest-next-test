@@ -24,6 +24,10 @@ export class RbacService implements OnModuleInit {
       { key: PermissionKey.ShopCommentsModerate, name: 'Moderate shop comments', description: 'Review and moderate product comments' },
       { key: PermissionKey.ShopAnalyticsRead, name: 'Read shop analytics', description: 'View shop operational analytics' },
       { key: PermissionKey.ShopAuditRead, name: 'Read shop audit feed', description: 'View shop change history' },
+      { key: PermissionKey.ConversationsRead, name: 'Read conversations', description: 'View merchant-scoped conversations and handoffs' },
+      { key: PermissionKey.ConversationsTakeover, name: 'Take over conversations', description: 'Accept, release, and manage merchant conversation handoffs' },
+      { key: PermissionKey.DemandRead, name: 'Read demand aggregates', description: 'View merchant-scoped privacy-safe demand aggregates' },
+      { key: PermissionKey.ChannelsRead, name: 'Read channel status', description: 'View merchant-scoped channel configuration and health status' },
     ];
     for (const permission of definitions) await this.prisma.permission.upsert({ where: { key: permission.key }, update: { name: permission.name, description: permission.description }, create: permission });
     const permissions = await this.prisma.permission.findMany({ where: { key: { in: definitions.map(({ key }) => key) } } });
@@ -59,7 +63,10 @@ export class RbacService implements OnModuleInit {
 
   private async upsertRole(key: string, name: string, description: string, permissionIds: string[]) {
     const role = await this.prisma.role.upsert({ where: { key }, update: { name, description }, create: { key, name, description } });
-    await this.prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
-    await this.prisma.rolePermission.createMany({ data: permissionIds.map((permissionId) => ({ roleId: role.id, permissionId })) });
+    // Idempotent and concurrent-registration safe: remove only stale links,
+    // then add missing links with skipDuplicates so two parallel
+    // ensureDefaults calls cannot collide on (roleId, permissionId).
+    await this.prisma.rolePermission.deleteMany({ where: { roleId: role.id, permissionId: { notIn: permissionIds } } });
+    await this.prisma.rolePermission.createMany({ data: permissionIds.map((permissionId) => ({ roleId: role.id, permissionId })), skipDuplicates: true });
   }
 }

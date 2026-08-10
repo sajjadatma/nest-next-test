@@ -1,0 +1,67 @@
+id: MVP1-B09b
+title: Checkout handoff HTTP API for UI continuation
+goal: Expose the B09 signed checkout handoff as HTTP endpoints so the existing web checkout can open and verify a handoff token, load the cart snapshot, and recover safely from expiry/stock/price changes before continuing the existing order flow.
+why: F02 (checkout continuation UI) needs a server-verified entry point; B09 created only service-level tools. AC-06/14 require tamper/expiry-safe handoff opening.
+preconditions:
+  - MVP1-B09 DONE (Cart + CartItem + checkout-link.service with HMAC verify, QA PASS)
+  - B09 contracts v1.2 frozen (checkout-link tool schema)
+  - ORC serialized registration approval for the checkout handoff controller
+inputs:
+  - src/commerce/cart/cart.service.ts + cart.repository.ts (B09)
+  - src/commerce/checkout/checkout-link.service.ts (B09 - verifyCheckoutLink)
+  - src/shop/shop.service.ts (READ ONLY reference: quoteOrder shape for revalidation)
+  - src/commerce/commerce.module.ts (current wiring - add controller declaration)
+expected_output:
+  - src/commerce/checkout/checkout-handoff.controller.ts - GET /api/checkout/handoff/:token verifies signature+expiry, loads cart with current variant price/stock (revalidation), returns cartId, status, items with current prices/availability, expiresAt, canCheckout boolean, reason (OUT_OF_STOCK / PRICE_CHANGED / EXPIRED / INVALID / EMPTY)
+  - src/commerce/commerce.module.ts (extend - declare controller)
+  - src/app.module.ts (SERIALIZED ORC-approved - add CommerceModule to imports ONLY if not already registered; check current state first)
+  - Integration tests - valid token to 200 with current snapshot; expired to canCheckout=false reason EXPIRED; tampered to reason INVALID (or 400); out-of-stock to reason OUT_OF_STOCK; cross-merchant to 404
+read_set:
+  - src/commerce/cart/**, src/commerce/checkout/**, src/commerce/commerce.module.ts, src/app.module.ts
+  - docs/contracts/commerce-tools.md (B09 v1.2), docs/product/PRODUCT.md AC-06/09/14
+write_set:
+  - src/commerce/checkout/checkout-handoff.controller.ts (new)
+  - src/commerce/commerce.module.ts (declare CheckoutHandoffController; no other edits)
+  - "src/app.module.ts (SERIALIZED ORC-approved - register CommerceModule ONLY if not already imported; verify first; add exactly the import line needed)"
+  - test/integration/checkout-handoff.spec.ts (new)
+protected_set:
+  - src/main.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**, src/shop/** (no order changes)
+  - src/commerce/cart/**, src/commerce/checkout/checkout-link.service.ts (READ ONLY - no modification)
+  - prisma/schema.prisma + migrations (NO schema change)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+  - src/app.module.ts - ONLY the module import line for CommerceModule if missing; nothing else
+contracts:
+  - docs/contracts/commerce-tools.md (B09 v1.2 checkout link semantics)
+constraints:
+  - Verification FAILS CLOSED: invalid signature to INVALID; expired to EXPIRED (never falls through to order).
+  - Handoff endpoint NEVER creates an order; it only reads and reports; order creation stays in existing /api/shop/orders (revalidates again at creation).
+  - Response contains CURRENT prices/availability re-read at request time; if any line differs from snapshot then canCheckout=false with reason PRICE_CHANGED or OUT_OF_STOCK (no silent acceptance).
+  - No new dependencies; no schema change; no dashboard changes (F02 uses this API).
+implementation_notes: |-
+  - Controller thin: verify, load cart with current variant rows, compare snapshot vs current, build response.
+  - Return 200 with canCheckout=false + reason for all verification failures (avoids leaking token validity via status codes); malformed token to 400.
+  - Audit event 'commerce.checkout_handoff_opened' with correlation id; no PII in metadata.
+acceptance_criteria:
+  - AC-01: valid unexpired token with unchanged prices/stock - 200, canCheckout=true, current snapshot fields present.
+  - AC-02: expired token - 200, canCheckout=false, reason=EXPIRED.
+  - AC-03: tampered signature - 200, canCheckout=false, reason=INVALID.
+  - AC-04: variant stock below cart quantity now - canCheckout=false, reason=OUT_OF_STOCK.
+  - AC-05: current price differs from snapshot - canCheckout=false, reason=PRICE_CHANGED.
+  - AC-06: token for another merchant - 404; empty cart - reason=EMPTY.
+  - AC-07: no protected changes beyond the serialized app.module.ts import; no order-flow changes; suites green.
+tests_required:
+  - test/integration/checkout-handoff.spec.ts (AC-01..AC-06)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run test:integration
+  - npm run test:preflight
+  - npm run test:database
+  - npm run build
+definition_of_done:
+  - Controller + wiring + tests; commands exit 0; HTTP read-backs (200 canCheckout outcomes, 404, 400) reported.
+non_goals:
+  - No order creation; no checkout page changes (F02); no payment changes; no schema changes
+stop_conditions:
+  - Any change to cart/checkout-link services, shop order flow, or protected files beyond the stated import line
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

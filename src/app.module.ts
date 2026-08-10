@@ -16,6 +16,9 @@ import { AuditModule } from './audit/audit.module';
 import { SystemLogsModule } from './system-logs/system-logs.module';
 import { ShopModule } from './shop/shop.module';
 import { AccountModule } from './account/account.module';
+import { CommerceModule } from './commerce/commerce.module';
+import { OrchestratorModule } from './orchestrator/orchestrator.module';
+import { ChannelStatusModule } from './channels/channel-status.module';
 
 @Module({
   imports: [
@@ -33,6 +36,9 @@ import { AccountModule } from './account/account.module';
     HealthModule,
     ShopModule,
     AccountModule,
+    CommerceModule,
+    OrchestratorModule,
+    ChannelStatusModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -8,3 +8,9 @@ test/generated
 playwright-report
 test-results
 tsconfig.build.tsbuildinfo
+
+# Hermes workspace artifacts
+dashboard/.next/
+.hermes/
+output/
+*.tsbuildinfo

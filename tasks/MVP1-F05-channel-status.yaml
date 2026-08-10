@@ -1,0 +1,61 @@
+id: MVP1-F05
+title: Channel configuration status UI
+goal: Build the merchant channel status page at /dashboard/shop/channels - per-channel configured/not-configured/healthy/error/last-event status without exposing credentials, with permission-aware access.
+why: Merchant operational view of channel connectivity (PRODUCT.md section 12); B12 Telegram config must be visible and health-checked without leaking secrets.
+preconditions:
+  - MVP1-B12 DONE (Telegram adapter + optional env config; QA PASS) - channel registry from B11 (src/channels/channel-registry.service.ts)
+  - ORC approval for a channel status read endpoint (GET /api/channels/status) if not already present - check first; if missing, a small backend task B12b is required before F05
+  - Frontend admin patterns (F01/F03/F04)
+inputs:
+  - src/channels/channel-registry.service.ts + telegram.module.ts (B11/B12 - registry and env presence)
+  - test/integration/telegram.spec.ts (what channel info is exposed)
+  - dashboard/src/app/dashboard/shop/ (admin pages), shop-admin-navigation.tsx
+expected_output:
+  - Backend (if needed) - src/channels/channel-status.controller.ts - GET /api/channels/status returns per-channel { id, label, configured, healthy, lastEventAt?, error? } - NO secrets, merchant-scoped, permission-gated (channels:read ORC-approved key)
+  - dashboard/src/app/dashboard/shop/channels/page.tsx (route)
+  - dashboard/src/components/channels/channel-status.tsx - status cards per channel, configured/healthy badges, last-event time, empty/loading/error states, no credential values rendered
+  - dashboard/src/components/channels/channel-status.test.tsx (MSW tests)
+  - shop-admin-navigation.tsx - add Channels entry + permission mapping
+read_set:
+  - src/channels/**, test/integration/telegram.spec.ts, dashboard/src/app/dashboard/shop/**, shop-admin-navigation.tsx
+write_set:
+  - (conditional) src/channels/channel-status.controller.ts + channel-status.module wiring (ORC-approved if endpoint missing)
+  - dashboard/src/app/dashboard/shop/channels/page.tsx (new)
+  - dashboard/src/components/channels/channel-status.tsx (new)
+  - dashboard/src/components/channels/channel-status.test.tsx (new)
+  - dashboard/src/components/shop-admin-navigation.tsx (SERIALIZED ORC-approved - add Channels entry + permission)
+protected_set:
+  - src/** (backend untouched unless the approved status endpoint task), existing admin pages, shared components, package*.json, next.config.ts
+  - No secrets anywhere in UI, tests, or responses
+contracts:
+  - Channel status response shape (per above)
+constraints:
+  - NEVER render or return credential values/tokens; configured flag only.
+  - healthy = env configured + last successful verification/delivery (as exposed by registry); error state shows safe message only.
+  - Merchant-scoped; permission-aware navigation (hide without channels:read).
+  - Follow existing admin patterns; no new dependencies.
+implementation_notes: |-
+  - If GET /api/channels/status does not exist, implement the minimal backend endpoint first (small ORC-approved task), then the UI. Verify registry/telegram module capabilities before designing.
+acceptance_criteria:
+  - AC-01: status cards show configured/not-configured/healthy/error per channel from API.
+  - AC-02: no credential values in DOM, tests, or API responses (inspection).
+  - AC-03: empty, loading, error states render; last-event time shown when present.
+  - AC-04: navigation entry permission-aware (channels:read).
+  - AC-05: merchant scoping enforced (backend) and reflected in UI.
+  - AC-06: no protected changes beyond approved; no dependencies; suites green.
+tests_required:
+  - channel-status.test.tsx (AC-01..AC-04 with MSW)
+  - If backend endpoint added - test/integration/channel-status.spec.ts (AC-05, 403 without permission)
+  - npm run test:frontend + full regression
+verification_commands:
+  - npm run test:frontend
+  - npm run typecheck
+  - npm run build
+definition_of_done:
+  - Status page + (if needed) backend endpoint + tests; commands exit 0; browser smoke with real API.
+non_goals:
+  - No credential management UI, no channel configuration editing, no design-system overhaul
+stop_conditions:
+  - Any secret exposure; dependency addition; protected changes beyond approval
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

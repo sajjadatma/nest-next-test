@@ -1,4 +1,6 @@
-import { Body, Controller, Get, NotFoundException, Param, Put, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Put, Req, UseGuards } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { type Request } from 'express';
 import { ApiBearerAuth, ApiForbiddenResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../prisma/prisma.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -10,6 +12,8 @@ import { AssignPermissionsDto } from './dto/assign-permissions.dto';
 import { BulkAssignAccessDto } from './dto/bulk-assign-access.dto';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { AuditService } from '../audit/audit.service';
+import { DemandRetentionService } from '../demand/demand-retention.service';
+import { ConversationRetentionService } from '../conversations/conversation-retention.service';
 
 const roleSelect = { key: true, name: true, permissions: { select: { permission: { select: { key: true, name: true } } } } } as const;
 
@@ -20,6 +24,40 @@ const roleSelect = { key: true, name: true, permissions: { select: { permission:
 @Controller('admin')
 export class AdminController {
   constructor(private prisma: PrismaService, private audit: AuditService) {}
+
+  @Post('retention/demand')
+  async retainDemand(@Body() body: unknown, @CurrentUser() actor: { id: string }, @Req() request: Request) {
+    return this.runRetention('demand', body, actor.id, this.correlationId(request));
+  }
+
+  @Post('retention/conversations')
+  async retainConversations(@Body() body: unknown, @CurrentUser() actor: { id: string }, @Req() request: Request) {
+    return this.runRetention('conversations', body, actor.id, this.correlationId(request));
+  }
+
+  private async runRetention(kind: 'demand' | 'conversations', body: unknown, actorId: string, correlationId: string) {
+    if (!body || typeof body !== 'object' || typeof (body as { dryRun?: unknown }).dryRun !== 'boolean') throw new BadRequestException('dryRun must be a boolean');
+    const { dryRun, merchantId } = body as { dryRun: boolean; merchantId?: unknown };
+    if (merchantId !== undefined && (typeof merchantId !== 'string' || !merchantId.trim())) throw new BadRequestException('merchantId must be a non-empty string');
+    const retentionDays = Number(process.env.RETENTION_DAYS ?? 0);
+    if (!Number.isInteger(retentionDays) || retentionDays < 0) throw new BadRequestException('RETENTION_DAYS must be a non-negative integer');
+    if (retentionDays === 0) throw new BadRequestException('Retention is disabled (RETENTION_DAYS=0)');
+    const cutoff = new Date(Date.now() - retentionDays * 86_400_000);
+    const request = { cutoff, merchantId, dryRun };
+    const result = kind === 'demand'
+      ? await new DemandRetentionService(this.prisma).deleteDemandOlderThan(request)
+      : await new ConversationRetentionService(this.prisma).deleteConversationsOlderThan(request);
+    await this.audit.record(`retention.${kind}.executed`, 'retention', undefined, actorId, { dryRun, merchantId, retentionDays, count: result.count, deleted: result.deleted, correlationId });
+    return { dryRun, retentionDays, cutoff: cutoff.toISOString(), ...result };
+  }
+
+  private correlationId(request: Request): string {
+    const value = request.headers['x-request-id'];
+    const candidate = Array.isArray(value) ? value[0] : value;
+    return typeof candidate === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(candidate)
+      ? candidate
+      : randomUUID();
+  }
 
   @Get('roles')
   @ApiOperation({ summary: 'List roles and their permissions' })

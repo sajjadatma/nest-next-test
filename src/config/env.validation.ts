@@ -20,6 +20,9 @@ const schema = z.object({
   RESEND_API_KEY: z.string().optional(),
   ORDER_EMAIL_FROM: z.string().optional(),
   SHOP_PUBLIC_URL: optionalUrl,
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+  RETENTION_DAYS: z.coerce.number().int().nonnegative().default(0),
 }).superRefine((value, context) => {
   if (value.NODE_ENV === 'production' && value.FRONTEND_ORIGINS.split(',').map((origin) => origin.trim()).filter(Boolean).length === 0) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['FRONTEND_ORIGINS'], message: 'FRONTEND_ORIGINS is required in production' });

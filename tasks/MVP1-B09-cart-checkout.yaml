@@ -1,0 +1,80 @@
+id: MVP1-B09
+title: Persistent cart and signed checkout handoff
+goal: Add merchant/customer/conversation-scoped persistent Cart + CartItem with verified variant lines, and an expiring tamper-resistant signed checkout handoff that revalidates current price/stock and continues into the existing web checkout/order flow.
+why: AC-06/09/12/14 require verified variant selection to reach the existing COD order path safely; the storefront currently has only a client-side Zustand cart.
+preconditions:
+  - MVP1-Q08 PASS (conversation API + orchestrator live) OR B08 DONE with QA PASS
+  - Contracts v1 frozen (commerce-tools.md create_cart/add_to_cart/create_checkout_link schemas)
+  - Existing order invariants in src/shop/shop.service.ts preserved (atomic stock reservation, idempotency)
+  - ORC review of current schema (Cart tables absent) and app.module wiring
+inputs:
+  - prisma/schema.prisma (current models incl. ProductVariant, Merchant, Customer, Conversation)
+  - src/shop/shop.service.ts (READ ONLY reference: order creation, quote, confirmation token hashing)
+  - src/shop/dto/create-order.dto.ts (order payload shape for handoff continuation)
+  - src/commerce/commerce-tools.service.ts + contracts (tool envelope pattern)
+  - src/config/runtime-config.service.ts (SHOP_PUBLIC_URL for checkout link base)
+  - docs/contracts/commerce-tools.md, docs/product/PRODUCT.md AC-06/09/12/14
+expected_output:
+  - Prisma models: Cart (merchantId, customerId?, externalUserId?, conversationId?, status ACTIVE|HANDED_OFF|CONVERTED|EXPIRED|ABANDONED, signed token fields, expiresAt, totals snapshot) + CartItem (cartId, variantId, quantity, unitPriceMinor snapshot, currency) + one migration (additive)
+  - src/commerce/cart/cart.repository.ts + cart.service.ts: createCart, addToCart (revalidate variant availability), getCart, expire
+  - src/commerce/checkout/checkout-link.service.ts: createCheckoutLink(cartId) - HMAC-signed token (merchant, cart, variant lines, price snapshot, expiry), verifyCheckoutLink(token), issue redirect URL into existing /shop/checkout flow
+  - create_cart / add_to_cart / create_checkout_link tools added to CommerceToolsService facade following Golden Example (no direct Prisma in facade)
+  - Tests: cart lifecycle, availability revalidation, signed link tamper/expiry/replay, price snapshot, merchant isolation
+read_set:
+  - prisma/schema.prisma, src/shop/shop.service.ts, src/shop/dto/create-order.dto.ts
+  - src/commerce/**, src/config/runtime-config.service.ts
+  - docs/contracts/commerce-tools.md, docs/product/PRODUCT.md
+write_set:
+  - prisma/schema.prisma (add Cart, CartItem)
+  - prisma/migrations/<new-timestamp>_cart_checkout/migration.sql (new, additive)
+  - src/commerce/cart/cart.repository.ts (new)
+  - src/commerce/cart/cart.service.ts (new)
+  - src/commerce/checkout/checkout-link.service.ts (new)
+  - src/commerce/checkout/checkout-link.constants.ts (new - token TTL, secret env name)
+  - src/commerce/commerce-tools.service.ts (extend with create_cart, add_to_cart, create_checkout_link)
+  - src/commerce/contracts/commerce-tool.contracts.ts (extend)
+  - "src/commerce/commerce.module.ts (APPROVED by ORC 2026-08-10 - register CartService/CheckoutLinkService providers for DI; nothing else)"
+  - src/commerce/commerce-tools.service.spec.ts + test/database/cart-checkout.integration.spec.ts (extend/new)
+protected_set:
+  - src/main.ts, src/app.module.ts (module registration in ORC-serialized step), src/auth/**, src/rbac/**, src/audit/**, src/observability/**, src/shop/** (order invariants untouched)
+  - Existing migrations (new file only), package*.json, docker-compose.yml, .env, dashboard/**
+  - Existing order creation flow: DO NOT modify createOrder; handoff only prepares the cart and redirects
+contracts:
+  - docs/contracts/commerce-tools.md (create_cart, add_to_cart, create_checkout_link exact schemas; CHECKOUT_LINK_EXPIRED/INVALID error codes)
+constraints:
+  - add_to_cart revalidates variant stock at call time; INSUFFICIENT_STOCK on shortfall; quantity 1..20 per line.
+  - Checkout link: HMAC-SHA256 over (cartId, merchantId, variantLines, priceSnapshotMinor, expiresAt) with server secret (new env CHECKOUT_SIGNING_SECRET, min 32 chars, added to env.validation.ts via ORC-approved config task); TTL 30 minutes default; verify fails closed on tamper/expiry.
+  - At continuation, order creation MUST revalidate current price/stock (existing shop invariants handle this at createOrder - handoff does NOT bypass it).
+  - No new dependencies (use node:crypto HMAC, no JWT lib).
+  - Cart scoped by (merchantId, customerId|externalUserId|conversationId); cross-merchant access -> CART_NOT_FOUND.
+  - Idempotency: add_to_cart with same (cartId, variantId) increments quantity, no duplicate rows.
+  - No dashboard/UI changes (F02 later); no payment changes; no schema for raw payloads.
+implementation_notes: |-
+  - Follow B03 Golden Example: facade delegates to cart/checkout services; services use repositories; audit event per mutation ('commerce.cart_created', 'commerce.cart_item_added', 'commerce.checkout_link_created').
+  - Token verification must be constant-time (crypto.timingSafeEqual).
+  - Cart totals are snapshot metadata for display only; authoritative totals always recomputed at order creation.
+  - env.validation.ts change (CHECKOUT_SIGNING_SECRET) requires explicit ORC approval - if blocked, use existing JWT_SECRET-derived HMAC key and document.
+acceptance_criteria:
+  - AC-01: create_cart + add_to_cart persist one cart with verified variant lines; duplicate add increments quantity; quantity bound 1..20.
+  - AC-02: add_to_cart with insufficient stock -> INSUFFICIENT_STOCK; variant for another merchant -> VARIANT_NOT_FOUND.
+  - AC-03: create_checkout_link returns signed URL with expiry; verify accepts valid token and rejects tampered/expired/replayed-after-expiry tokens (CHECKOUT_LINK_INVALID/EXPIRED).
+  - AC-04: cross-merchant cart access -> CART_NOT_FOUND (isolation).
+  - AC-05: order creation after handoff revalidates price/stock (existing integration test still passes unchanged).
+  - AC-06: no protected changes; no dependency changes; no dashboard changes; suites green.
+tests_required:
+  - test/database/cart-checkout.integration.spec.ts (AC-01..AC-05 against fresh DB)
+  - Unit tests for checkout-link service (tamper/expiry/timing-safe)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run prisma:generate && npm run prisma:migrate:deploy
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Cart + signed link + tools + tests; commands exit 0; evidence read-backs (cart rows, token verify outcomes, order regression).
+non_goals:
+  - No dashboard/checkout-page changes (F02); no human handoff changes (B10); no payment changes; no order-flow changes
+stop_conditions:
+  - Any change to createOrder/shop order invariants; dependency addition; protected-file change; contract divergence
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

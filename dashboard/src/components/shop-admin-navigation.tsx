@@ -2,7 +2,9 @@ import Link from "next/link";
 import { ReactNode } from "react";
 import { ShopSection } from "@/components/shop-admin-types";
 
-const links: { id: ShopSection; href: string; label: string; description: string }[] = [
+type NavigationSection = ShopSection | "conversations" | "demand" | "channels";
+
+const links: { id: NavigationSection; href: string; label: string; description: string }[] = [
   { id: "overview", href: "/dashboard/shop", label: "Overview", description: "Store health" },
   { id: "products", href: "/dashboard/shop/products", label: "Products", description: "Catalogue & stock" },
   { id: "inventory", href: "/dashboard/shop/inventory", label: "Inventory", description: "Stock control" },
@@ -13,9 +15,12 @@ const links: { id: ShopSection; href: string; label: string; description: string
   { id: "moderation", href: "/dashboard/shop/moderation", label: "Moderation", description: "Customer feedback" },
   { id: "reports", href: "/dashboard/shop/reports", label: "Reports", description: "Performance" },
   { id: "audit", href: "/dashboard/shop/audit", label: "Audit", description: "Change history" },
+  { id: "conversations", href: "/dashboard/shop/conversations", label: "Conversations", description: "Operator inbox" },
+  { id: "demand", href: "/dashboard/shop/demand", label: "Demand", description: "Request insights" },
+  { id: "channels", href: "/dashboard/shop/channels", label: "Channels", description: "Connection status" },
 ];
 
-const sectionPermissions: Partial<Record<ShopSection, string>> = {
+const sectionPermissions: Partial<Record<NavigationSection, string>> = {
   products: "shop:catalog:manage",
   categories: "shop:catalog:manage",
   inventory: "shop:inventory:manage",
@@ -25,10 +30,13 @@ const sectionPermissions: Partial<Record<ShopSection, string>> = {
   moderation: "shop:comments:moderate",
   reports: "shop:analytics:read",
   audit: "shop:audit:read",
+  conversations: "conversations:read",
+  demand: "demand:read",
+  channels: "channels:read",
 };
 
-function ShopNavigationMark({ section }: { section: ShopSection }) {
-  const paths: Record<ShopSection, ReactNode> = {
+function ShopNavigationMark({ section }: { section: NavigationSection }) {
+  const paths: Record<NavigationSection, ReactNode> = {
     overview: <path d="M4 12 12 5l8 7v7H4zM9 19v-4h6v4" />,
     products: <path d="M5 5h14v14H5zM8 9h8M8 13h5" />,
     inventory: <path d="M5 7h14v12H5zM8 7V5h8v2M8 12h8M8 15h5" />,
@@ -39,6 +47,9 @@ function ShopNavigationMark({ section }: { section: ShopSection }) {
     moderation: <path d="M5 5h14v14H5zM8 9h8M8 13h5M8 16h3" />,
     reports: <path d="M5 19V5h14v14zM8 16v-4M12 16V8M16 16v-6" />,
     audit: <path d="M6 4h12v16H6zM9 8h6M9 12h6M9 16h4" />,
+    conversations: <path d="M5 6h14v10H9l-4 3v-3H5zM8 10h8M8 13h5" />,
+    demand: <path d="M5 19V5M5 19h14M8 15v-4M12 15V8M16 15v-7" />,
+    channels: <path d="M6 8h12M6 16h12M9 5v6M15 13v6" />,
   };
 
   return (
@@ -58,11 +69,13 @@ function ShopNavigationMark({ section }: { section: ShopSection }) {
   );
 }
 
-export function ShopAdminNavigation({ active, permissions }: { active: ShopSection; permissions: string[] }) {
-  const canAccess = (section: ShopSection) =>
-    permissions.includes("shop:manage") ||
-    (section === "orders" && permissions.includes("shop:orders:fulfill")) ||
-    (sectionPermissions[section] ? permissions.includes(sectionPermissions[section]) : false);
+export function ShopAdminNavigation({ active, permissions }: { active: NavigationSection; permissions: string[] }) {
+  const canAccess = (section: NavigationSection) =>
+    section === "conversations" || section === "demand" || section === "channels"
+      ? permissions.includes(sectionPermissions[section] ?? "")
+      : permissions.includes("shop:manage") ||
+        (section === "orders" && permissions.includes("shop:orders:fulfill")) ||
+        (sectionPermissions[section] ? permissions.includes(sectionPermissions[section]) : false);
   return (
     <nav className="shop-admin-nav" aria-label="Shop management">
       {links.filter((link) => canAccess(link.id)).map((link) => (

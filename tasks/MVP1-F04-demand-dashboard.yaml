@@ -1,0 +1,67 @@
+id: MVP1-F04
+title: Demand dashboard UI
+goal: Build the merchant demand dashboard at /dashboard/shop/demand - date/outcome filters, matched vs unmet demand, out-of-stock, price-too-high, top requested attributes/sizes/colors, and trend where sample size allows - rendering ONLY the deterministic B14 API aggregates with empty/loading/error states.
+why: AC-11/13 - the merchant operational view of demand; must never present predictive claims or revenue from conversation volume.
+preconditions:
+  - MVP1-B14 DONE (GET /api/demand/summary with date/outcome filters, merchant-scoped, demand:read RBAC; QA PASS)
+  - Frontend Golden Example (F01/F03 patterns) + existing admin page shell patterns (dashboard/src/app/dashboard/shop/)
+  - Repository facts: admin pages delegate page.tsx to client components; api() wrapper; RTL approach from F01
+inputs:
+  - test/database/demand-aggregates.integration.spec.ts + demand.controller.ts (B14 API shapes)
+  - dashboard/src/app/dashboard/shop/ (existing admin pages + navigation), shop-admin-navigation.tsx (conversations entry added in F03 - add demand entry too, ORC-approved serialized)
+  - docs/contracts/demand-events.md (view semantics, thresholds)
+expected_output:
+  - dashboard/src/app/dashboard/shop/demand/page.tsx (route)
+  - dashboard/src/components/demand/demand-dashboard.tsx - date range picker (presets 7d/30d/90d + custom), outcome filter chips (ALL/MATCHED/UNMATCHED/OUT_OF_STOCK/PRICE_TOO_HIGH), summary cards (volume, matched, unmet, out-of-stock, price-too-high), category bar list, top attributes/sizes/colors lists, trend indicator (only when present), empty/loading/error states
+  - dashboard/src/components/demand/demand-types.ts
+  - dashboard/src/components/demand/demand-dashboard.test.tsx (MSW tests)
+  - shop-admin-navigation.tsx: add Demand entry + permission mapping (demand:read)
+read_set:
+  - dashboard/src/app/dashboard/shop/**, shop-admin-navigation.tsx, shop-admin-types.ts, dashboard-client.tsx, lib/api.ts
+  - src/demand/demand.controller.ts + test/database/demand-aggregates.integration.spec.ts (API shapes), docs/contracts/demand-events.md
+write_set:
+  - dashboard/src/app/dashboard/shop/demand/page.tsx (new)
+  - dashboard/src/components/demand/demand-dashboard.tsx (new)
+  - dashboard/src/components/demand/demand-types.ts (new)
+  - dashboard/src/components/demand/demand-dashboard.test.tsx (new)
+  - dashboard/src/components/shop-admin-navigation.tsx (SERIALIZED ORC-approved - add Demand link + demand:read permission)
+protected_set:
+  - src/** (backend untouched), existing admin pages (no edits), dashboard-client.tsx, shop-admin-types.ts, shop-types.ts, lib/api.ts, package*.json, next.config.ts
+  - shop-admin-navigation.tsx: ONLY the Demand entry addition
+contracts:
+  - B14 API response shape (range, volume, volumeByCategory, matched, unmet, outOfStock, priceTooHigh, topAttributes, topSizes, topColors, trend) - volume field added by ORC-approved backend fix (2026-08-10)
+  - docs/contracts/demand-events.md (threshold suppression semantics - suppressed cells are absent, not zero)
+constraints:
+  - Render ONLY what the API returns - no client-side totals computation, no revenue/opportunity claims, no predictive wording.
+  - Suppressed (below-threshold) cells must not render as zero - show as absent/em-dash per B14 semantics.
+  - Filters change the API query (date range, outcome) - server is the source of truth; refetch on change with loading state.
+  - Follow F01/F03 patterns - client component, api() wrapper, existing CSS classes, RTL-ready copy.
+  - No new dependencies; no backend changes; no changes to other admin pages.
+implementation_notes: |-
+  - page.tsx delegates to DemandDashboard client component (existing admin pattern).
+  - Use existing date-range preset pattern (7d/30d/90d) matching shop reports if available; custom range uses validated from/to.
+  - Tests: render cards from fixture data, filter change refetches (MSW assert), empty state, loading state, error state with retry, suppressed-cell absence, permission-aware navigation.
+acceptance_criteria:
+  - AC-01: dashboard renders volume, matched/unmet, out-of-stock, price-too-high from API data (no client computation).
+  - AC-02: date preset and outcome filters refetch with correct query params; loading state shown.
+  - AC-03: suppressed cells are absent (not zero); trend renders only when API provides it.
+  - AC-04: empty, loading, and error+retry states render correctly.
+  - AC-05: navigation Demand entry visible only with demand:read.
+  - AC-06: RTL/Persian-ready copy; keyboard accessible.
+  - AC-07: no backend/protected changes beyond navigation entry; no new dependencies; suites green.
+tests_required:
+  - dashboard/src/components/demand/demand-dashboard.test.tsx (AC-01..AC-06 with MSW)
+  - npm run test:frontend
+  - Full regression gate - test:preflight + test:database
+verification_commands:
+  - npm run test:frontend
+  - npm run typecheck
+  - npm run build
+definition_of_done:
+  - Dashboard + types + tests + navigation entry; commands exit 0; browser smoke of filter change with real API.
+non_goals:
+  - No predictive AI, no revenue/opportunity claims, no backend changes, no design-system overhaul
+stop_conditions:
+  - Any backend change; existing admin page edits; dependency addition; API contract mismatch with B14
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions

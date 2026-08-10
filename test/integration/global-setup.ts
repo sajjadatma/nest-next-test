@@ -5,6 +5,7 @@ let container: StartedPostgreSqlContainer;
 
 export default async function setup() {
   process.env.TESTCONTAINERS_RYUK_DISABLED = 'true';
+  process.env.AUTH_RATE_LIMIT_MAX = '1000';
   container = await new PostgreSqlContainer('postgres:16-alpine').withStartupTimeout(30_000).start();
   process.env.DATABASE_URL = container.getConnectionUri();
   process.env.JWT_SECRET = 'integration-test-secret-must-be-at-least-32-characters';

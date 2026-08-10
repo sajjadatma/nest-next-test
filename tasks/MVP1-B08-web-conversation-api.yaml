@@ -1,0 +1,77 @@
+id: MVP1-B08
+title: Web conversation API and orchestrator integration
+goal: Expose the web chat harness through the same normalized pipeline and agent policy used by external channels - conversation controller (POST message to normalized inbound, orchestrator, agent with fake provider, persisted Message + intent + reference state, CommerceResponse), GET conversation history, correlation continuity, and the serialized AppModule registration.
+why: AC-08/09/14 require a channel-agnostic orchestration path; the web harness is the deterministic E2E surface before external channel adapters (B11/B12).
+preconditions:
+  - MVP1-B07 DONE (agent service + fake provider + policy + validator, QA PASS)
+  - Contracts v1 frozen (messages.md NormalizedInboundMessage + CommerceResponse)
+  - ORC serialized registration approval for src/app.module.ts included in this task's write_set
+inputs:
+  - src/ai/agent.service.ts + gateway/fake provider + policy + validator (B07)
+  - src/conversations/conversation.service.ts + reference-state + intent-parser (B05/B06)
+  - src/commerce/commerce-tools.service.ts (B03/B04/B04b)
+  - src/auth/optional-jwt-auth.guard.ts (existing pattern for public+auth endpoints)
+  - docs/contracts/messages.md, docs/contracts/commerce-tools.md
+expected_output:
+  - src/orchestrator/conversation.controller.ts - POST message endpoint accepting text with channel web; GET conversation history (merchant-scoped)
+  - src/orchestrator/orchestrator.service.ts - wires normalizeAndPersist, intent parse/refine, reference-state resolve, agent, CommerceResponse, persist outcome; returns reply + conversationId + messageId
+  - src/orchestrator/orchestrator.module.ts - imports ConversationModule and AiModule; provides OrchestratorService; declares ConversationController (ORC-APPROVED 2026-08-10 - separate Orchestrator module breaks the Conversation to AI to Commerce to Conversation circular dependency without touching protected AI/Commerce wiring)
+  - src/app.module.ts serialized registration - OrchestratorModule (ONLY this import line)
+  - Integration tests - POST text to carousel reply with verified products; follow-up resolves; no-match honesty; duplicate POST idempotent; unauthorized cross-merchant access denied; correlation id present
+read_set:
+  - src/conversations/**, src/ai/**, src/commerce/**, src/auth/optional-jwt-auth.guard.ts, src/prisma/prisma.service.ts
+  - docs/contracts/messages.md, docs/product/PRODUCT.md AC-01..09/12/14
+write_set:
+  - src/orchestrator/conversation.controller.ts (new)
+  - src/orchestrator/orchestrator.service.ts (new)
+  - src/orchestrator/orchestrator.module.ts (new - imports ConversationModule + AiModule, providers OrchestratorService, controllers ConversationController)
+  - src/app.module.ts (SERIALIZED ORC-approved registration ONLY - add OrchestratorModule to imports; no other edits)
+  - test/integration/conversation.spec.ts (new)
+protected_set:
+  - src/main.ts, src/auth/**, src/rbac/**, src/audit/**, src/observability/**, src/shop/**
+  - src/conversations/** (NO modification - ConversationService already exported)
+  - src/ai/**, src/commerce/** (NO modification - protected wiring)
+  - prisma/schema.prisma + migrations (NO schema change)
+  - package*.json, docker-compose.yml, .env, dashboard/**
+  - src/app.module.ts: ONLY the OrchestratorModule import line; nothing else
+contracts:
+  - docs/contracts/messages.md (NormalizedInboundMessage mapping for web: channel web, externalMessageId = client-generated uuid or server uuid per request; idempotency via merchantId+channel+externalMessageId)
+  - docs/contracts/commerce-tools.md (tool envelope, error codes)
+constraints:
+  - Web path MUST go through the same normalized pipeline as external channels - no web-only business logic branch.
+  - Merchant scoping: conversation access requires merchant context (header x-merchant-id or JWT-scoped default merchant for MVP1 web); cross-merchant to 403/404.
+  - Idempotent POST: same externalMessageId returns the same persisted message without duplicate processing.
+  - Fake provider only (no real LLM wiring); agent returns CommerceResponse union.
+  - Correlation: request id flows into audit/log metadata.
+  - Rate limits: existing global throttle applies.
+  - No new dependencies; no dashboard changes (frontend task F01 later).
+implementation_notes: |-
+  - Use OptionalJwtAuthGuard pattern: authenticated users get linked customer context; anonymous web users get a merchant-scoped anonymous customer via CustomerChannelIdentity (channel web).
+  - Orchestrator returns reply synchronously; on agent HANDOFF_REQUIRED it returns human_handoff CommerceResponse.
+  - Keep controller thin; all logic in orchestrator service.
+acceptance_criteria:
+  - AC-01: POST text returns CommerceResponse carousel with verified product data from real DB; HTTP 201.
+  - AC-02: follow-up (the second one or Persian equivalent) resolves to the referenced product id (reference-state persisted).
+  - AC-03: no-match request returns honest text with matched=false semantics; no invented products.
+  - AC-04: duplicate POST with same externalMessageId creates one message; second returns 200 with same messageId.
+  - AC-05: cross-merchant conversation access denied (403/404); merchant isolation preserved.
+  - AC-06: correlation id present in response header and audit metadata.
+  - AC-07: app.module.ts diff contains ONLY the ConversationModule import line; no protected changes; no dependency changes; suites green.
+tests_required:
+  - test/integration/conversation.spec.ts (AC-01..AC-06)
+  - Full regression: test:preflight + test:database
+verification_commands:
+  - npm run test:integration
+  - npm run test:unit
+  - npm run test:database
+  - npm run test:preflight
+  - npm run build
+definition_of_done:
+  - Controller + orchestrator + serialized registration + tests; commands exit 0; HTTP read-backs (201/200/403, message ids) reported.
+non_goals:
+  - No Telegram/Instagram/WhatsApp adapters (B11/B12); no frontend chat UI (F01); no cart/checkout tools yet (B09)
+  - No real LLM provider; no schema changes
+stop_conditions:
+  - Any edit to src/app.module.ts beyond the ConversationModule import line; schema change; dependency addition; contract divergence
+handoff_format:
+  - IMPLEMENTATION_COMPLETE / Changed files / Tests run / Evidence / Deviations / Blocked questions
