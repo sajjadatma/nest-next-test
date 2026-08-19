@@ -74,6 +74,20 @@ export class AccountService {
     return { items, page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) };
   }
 
+  async order(userId: string, id: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id, customerId: userId },
+      include: {
+        items: true,
+        shipments: { orderBy: { createdAt: 'desc' } },
+        statusEvents: { orderBy: { createdAt: 'asc' } },
+        payments: { orderBy: { createdAt: 'desc' }, select: { id: true, status: true, methodType: true, amountMinor: true, currency: true, paidAt: true, createdAt: true } },
+      },
+    });
+    if (!order) throw new NotFoundException('Order was not found.');
+    return order;
+  }
+
   payments(userId: string) { return this.prisma.payment.findMany({ where: { customerId: userId }, select: { id: true, orderId: true, provider: true, methodType: true, status: true, amountMinor: true, currency: true, paidAt: true, refundedAt: true, createdAt: true, events: { select: { id: true, type: true, amountMinor: true, createdAt: true }, orderBy: { createdAt: 'asc' } } }, orderBy: { createdAt: 'desc' } }); }
 
   sessions(userId: string) { return this.prisma.refreshToken.findMany({ where: { userId, revokedAt: null, expiresAt: { gt: new Date() } }, select: { id: true, createdAt: true, expiresAt: true }, orderBy: { createdAt: 'desc' } }); }

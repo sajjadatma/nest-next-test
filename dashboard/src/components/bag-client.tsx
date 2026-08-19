@@ -7,9 +7,9 @@ import { money, productImages } from "@/components/shop-types";
 
 export function BagClient() {
   const { cart, ready, subtotalMinor, updateQuantity, removeProduct } = useCart();
-  if (!ready) return <main className="bag-page" aria-busy="true"><p>Restoring your bag…</p></main>;
+  if (!ready) return <main id="main-content" className="bag-page" aria-busy="true"><p>Restoring your bag…</p></main>;
   if (!cart.length) return (
-    <main className="bag-page bag-empty">
+    <main id="main-content" className="bag-page bag-empty">
       <p className="shop-kicker">Your selection</p>
       <h1>Your bag is ready for something good.</h1>
       <p>Pieces you add will stay here while you explore the collection.</p>
@@ -17,7 +17,7 @@ export function BagClient() {
     </main>
   );
   return (
-    <main className="bag-page">
+    <main id="main-content" className="bag-page">
       <header className="bag-heading"><div><p className="shop-kicker">Your selection</p><h1>Shopping bag.</h1></div><span>{cart.length} {cart.length === 1 ? "piece" : "pieces"}</span></header>
       <div className="bag-layout">
         <section className="bag-lines" aria-label="Bag items">

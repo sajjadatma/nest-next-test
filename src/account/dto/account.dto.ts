@@ -5,7 +5,7 @@ export enum AddressTypeInput { SHIPPING = 'SHIPPING', BILLING = 'BILLING', BOTH 
 
 export class UpdateAccountProfileDto {
   @IsOptional() @IsString() @MaxLength(80) phone?: string;
-  @IsOptional() @IsString() @MaxLength(500) avatarUrl?: string;
+  @IsOptional() @IsString() @MaxLength(2_000_000) avatarUrl?: string;
   @IsOptional() @IsString() @MaxLength(20) locale?: string;
   @IsOptional() @IsString() @MaxLength(80) timezone?: string;
 }

@@ -113,10 +113,10 @@ export function CheckoutClient() {
     }
   }
 
-  if (!ready) return <main className="checkout-page" aria-busy="true"><p>Preparing checkout…</p></main>;
-  if (!cart.length) return <main className="checkout-page checkout-empty"><p className="shop-kicker">Delivery</p><h1>Your bag is empty.</h1><p>Add something before continuing to checkout.</p><Link className="shop-cta" href="/shop">Return to shop</Link></main>;
+  if (!ready) return <main id="main-content" className="checkout-page" aria-busy="true"><p>Preparing checkout…</p></main>;
+  if (!cart.length) return <main id="main-content" className="checkout-page checkout-empty"><p className="shop-kicker">Delivery</p><h1>Your bag is empty.</h1><p>Add something before continuing to checkout.</p><Link className="shop-cta" href="/shop">Return to shop</Link></main>;
   return (
-    <main className="checkout-page">
+    <main id="main-content" className="checkout-page">
       <nav className="checkout-progress" aria-label="Checkout progress"><Link href="/shop/bag">1. Bag</Link><strong aria-current="step">2. Delivery</strong><span>3. Confirmation</span></nav>
       <header><p className="shop-kicker">Order information</p><h1>Where should it go?</h1><p>We’ll use these details only to deliver and confirm your order.</p></header>
       <form className="checkout-layout" onSubmit={handleSubmit(placeOrder)}>

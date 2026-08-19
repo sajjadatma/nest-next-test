@@ -14,6 +14,8 @@ import { SystemLogsPanel } from "@/components/system-logs-panel";
 import { ShopAdminPanel } from "@/components/shop-admin-panel";
 import { CustomerOrdersPanel } from "@/components/customer-orders-panel";
 import { ShopSection } from "@/components/shop-admin-types";
+import { LanguageSwitcher } from "@/components/language-switcher";
+import { useTranslation } from "@/i18n/language-provider";
 
 export type DashboardView = "overview" | "account" | "access" | "logs" | "shop";
 type CurrentUser = {
@@ -122,6 +124,7 @@ export function DashboardClient({
   shopSection?: ShopSection;
 }) {
   const router = useRouter();
+  const { t } = useTranslation();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [data, setData] = useState<Overview | null>(null);
   const [loginHistory, setLoginHistory] = useState<LoginHistoryEvent[]>([]);
@@ -377,6 +380,19 @@ export function DashboardClient({
   ];
   const toggle = (values: string[], key: string, checked: boolean) =>
     checked ? [...values, key] : values.filter((value) => value !== key);
+  const overviewActions = navigation
+    .filter(({ hidden, id }) => !hidden && id !== "overview")
+    .map((item) => ({
+      ...item,
+      description:
+        item.id === "shop"
+          ? t("Keep catalog, stock, orders, and delivery moving.")
+          : item.id === "access"
+            ? t("Review who can access the workspace and what they can do.")
+            : item.id === "logs"
+              ? t("Review recent system, access, and runtime events.")
+              : t("Update your profile and sign-in settings."),
+    }));
 
   return (
     <>
@@ -476,7 +492,7 @@ export function DashboardClient({
             <p className="eyebrow">Drive workspace</p>
             <h1>
               {view === "overview"
-                ? "Overview"
+                ? "B2B management"
                 : view === "shop"
                   ? "Shop management"
                   : view === "account"
@@ -488,79 +504,128 @@ export function DashboardClient({
             </div>
           </div>
           <div className="header-profile">
+            <LanguageSwitcher compact />
             <span className="header-avatar">{name[0].toUpperCase()}</span>
             <span>{name}</span>
           </div>
         </header>
         <main id="dashboard-main" className="workspace-content">
           {view === "overview" && (
-            <>
-              <section className="welcome-panel">
+            <div className="b2b-overview">
+              <section className="b2b-overview-hero" aria-labelledby="b2b-overview-title">
                 <div>
-                  <p className="eyebrow">Good to see you</p>
-                  <h2>
-                    Everything is ready
-                    <br />
-                    for the next move.
-                  </h2>
+                  <p className="eyebrow">Management dashboard</p>
+                  <h2 id="b2b-overview-title">Welcome back, {name}.</h2>
+                  <p>
+                    Your workspace is ready. Start with a priority below or move
+                    directly into the area you manage.
+                  </p>
                 </div>
-                <p>
-                  Your workspace is protected by database-backed roles and
-                  permissions.
-                </p>
-              </section>
-              <section className="metric-grid">
-                {data.metrics.map((metric) => (
-                  <article className="metric-card" key={metric.label}>
-                    <span>{metric.label}</span>
-                    <strong>{metric.value}</strong>
-                  </article>
-                ))}
-              </section>
-              <section className="content-card">
-                <div className="section-heading">
+                <dl className="b2b-overview-access" aria-label="Your workspace access">
                   <div>
-                    <p className="eyebrow">Directory</p>
-                    <h2>Recently joined</h2>
+                    <dt>Workspace status</dt>
+                    <dd><span className="b2b-status-indicator" aria-hidden="true" />Access current</dd>
                   </div>
-                  <span className="status-dot">System operational</span>
+                  <div>
+                    <dt>{user.roles.length === 1 ? "Your role" : "Your roles"}</dt>
+                    <dd>{user.roles.length || "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Available areas</dt>
+                    <dd>{overviewActions.length}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className="b2b-overview-section" aria-labelledby="workspace-snapshot-title">
+                <div className="b2b-overview-section-heading">
+                  <div>
+                    <p className="eyebrow">Workspace snapshot</p>
+                    <h2 id="workspace-snapshot-title">Live operational context</h2>
+                  </div>
+                  <p>Counts update each time this dashboard is opened.</p>
                 </div>
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <caption className="sr-only">
-                      Recently joined members
-                    </caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">Member</th>
-                        <th scope="col">Email address</th>
-                        <th scope="col">Joined</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.recentUsers.map((recent) => (
-                        <tr key={recent.id}>
-                          <td>
-                            <span className="person-cell">
-                              <span className="avatar">
-                                {(recent.name || recent.email)[0].toUpperCase()}
-                              </span>
-                              <strong>{recent.name || "Drive member"}</strong>
-                            </span>
-                          </td>
-                          <td>{recent.email}</td>
-                          <td>
-                            <time dateTime={recent.createdAt}>
-                              {new Date(recent.createdAt).toLocaleDateString()}
-                            </time>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="metric-grid b2b-overview-metrics">
+                  {data.metrics.map((metric) => (
+                    <article className="metric-card" key={metric.label}>
+                      <span>{metric.label}</span>
+                      <strong>{metric.value}</strong>
+                    </article>
+                  ))}
                 </div>
               </section>
-            </>
+
+              <div className="b2b-overview-grid">
+                <section className="content-card b2b-overview-activity" aria-labelledby="recent-members-title">
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">Team activity</p>
+                      <h2 id="recent-members-title">Recently joined</h2>
+                    </div>
+                  </div>
+                  {data.recentUsers.length ? (
+                    <div className="table-wrap">
+                      <table className="data-table">
+                        <caption className="sr-only">Recently joined members</caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Member</th>
+                            <th scope="col">Email address</th>
+                            <th scope="col">Joined</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {data.recentUsers.map((recent) => (
+                            <tr key={recent.id}>
+                              <td>
+                                <span className="person-cell">
+                                  <span className="avatar">
+                                    {(recent.name || recent.email)[0].toUpperCase()}
+                                  </span>
+                                  <strong>{recent.name || "Drive member"}</strong>
+                                </span>
+                              </td>
+                              <td>{recent.email}</td>
+                              <td>
+                                <time dateTime={recent.createdAt}>
+                                  {new Date(recent.createdAt).toLocaleDateString()}
+                                </time>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="b2b-overview-empty">
+                      <strong>No recent team activity.</strong>
+                      <p>New members will appear here as they join the workspace.</p>
+                    </div>
+                  )}
+                </section>
+
+                <section className="content-card b2b-overview-actions" aria-labelledby="next-actions-title">
+                  <div className="section-heading">
+                    <div>
+                      <p className="eyebrow">Next actions</p>
+                      <h2 id="next-actions-title">Go straight to work</h2>
+                    </div>
+                  </div>
+                  <div className="b2b-action-list">
+                    {overviewActions.map((item) => (
+                      <Link key={item.id} className="b2b-action-link" href={item.href}>
+                        <span className="b2b-action-icon"><NavigationIcon name={item.icon} /></span>
+                        <span>
+                          <strong>{item.label}</strong>
+                          <small>{item.description}</small>
+                        </span>
+                        <span className="b2b-action-arrow" aria-hidden="true">→</span>
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </div>
           )}
           {view === "account" && (
             <>

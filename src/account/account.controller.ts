@@ -22,6 +22,7 @@ export class AccountController {
   @Get('consents') consents(@CurrentUser() user: { id: string }) { return this.account.consents(user.id); }
   @Post('consents') recordConsent(@CurrentUser() user: { id: string }, @Body() dto: RecordConsentDto) { return this.account.recordConsent(user.id, dto); }
   @Get('orders') orders(@CurrentUser() user: { id: string }, @Query() query: AccountOrdersQueryDto) { return this.account.orders(user.id, query); }
+  @Get('orders/:id') order(@CurrentUser() user: { id: string }, @Param('id') id: string) { return this.account.order(user.id, id); }
   @Get('payments') payments(@CurrentUser() user: { id: string }) { return this.account.payments(user.id); }
   @Get('sessions') sessions(@CurrentUser() user: { id: string }) { return this.account.sessions(user.id); }
   @Delete('sessions/:id') revokeSession(@CurrentUser() user: { id: string }, @Param('id') id: string) { return this.account.revokeSession(user.id, id); }

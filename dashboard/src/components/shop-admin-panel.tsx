@@ -45,8 +45,11 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [pendingOrderAction, setPendingOrderAction] = useState<{ order: Order; status: OrderStatus } | null>(null);
   const [cancellationReason, setCancellationReason] = useState("");
+  const [cancellationError, setCancellationError] = useState("");
   const detailCloseRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const confirmationDialogRef = useRef<HTMLElement>(null);
+  const confirmationPreviousFocusRef = useRef<HTMLElement | null>(null);
   const [orderQuery, setOrderQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [orderStatus, setOrderStatus] = useState("");
@@ -115,6 +118,22 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
     document.addEventListener("keydown", close);
     return () => { document.removeEventListener("keydown", close); previousFocusRef.current?.focus(); previousFocusRef.current = null; };
   }, [selectedOrderId]);
+  useEffect(() => {
+    if (!pendingOrderAction) return;
+    const dialog = confirmationDialogRef.current;
+    const initialFocus = dialog?.querySelector<HTMLElement>("textarea, button");
+    initialFocus?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); setPendingOrderAction(null); return; }
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>("button, input, select, textarea, a[href]")].filter((element) => !element.hasAttribute("disabled"));
+      if (!focusable.length) return;
+      if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable[focusable.length - 1].focus(); }
+      else if (!event.shiftKey && document.activeElement === focusable[focusable.length - 1]) { event.preventDefault(); focusable[0].focus(); }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => { document.removeEventListener("keydown", handleKeyDown); confirmationPreviousFocusRef.current?.focus(); confirmationPreviousFocusRef.current = null; };
+  }, [pendingOrderAction]);
 
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -143,14 +162,16 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
   }
 
   function requestOrderUpdate(order: Order, status: OrderStatus) {
+    confirmationPreviousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setCancellationReason("");
+    setCancellationError("");
     setPendingOrderAction({ order, status });
   }
 
   async function updateOrder() {
     if (!pendingOrderAction) return;
     const { order, status } = pendingOrderAction;
-    if (status === "CANCELLED" && !cancellationReason.trim()) { setError("Add a reason before cancelling this order."); return; }
+    if (status === "CANCELLED" && !cancellationReason.trim()) { setCancellationError("Add a reason before cancelling this order."); return; }
     setError("");
     try {
       const updated = await api<Order>(
@@ -589,11 +610,11 @@ export function ShopAdminPanel({ section = "overview", permissions }: { section?
       </section>
       {pendingOrderAction && (
         <div className="admin-confirm-overlay" role="presentation">
-          <section className="admin-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="order-confirm-title" aria-describedby="order-confirm-copy">
+          <section ref={confirmationDialogRef} className="admin-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="order-confirm-title" aria-describedby="order-confirm-copy">
             <p className="eyebrow">Confirm order change</p>
             <h2 id="order-confirm-title">{pendingOrderAction.status === "CANCELLED" ? "Cancel this order?" : `Move ${pendingOrderAction.order.number} forward?`}</h2>
             <p id="order-confirm-copy">{pendingOrderAction.status === "CANCELLED" ? "The order will be cancelled and reserved stock will be restored." : `The order will move to ${orderStatusLabels[pendingOrderAction.status].toLowerCase()}.`}</p>
-            {pendingOrderAction.status === "CANCELLED" && <label>Cancellation reason<textarea autoFocus value={cancellationReason} onChange={(event) => setCancellationReason(event.target.value)} placeholder="Explain why this order is being cancelled" required /></label>}
+            {pendingOrderAction.status === "CANCELLED" && <label>Cancellation reason<textarea value={cancellationReason} onChange={(event) => { setCancellationReason(event.target.value); setCancellationError(""); }} placeholder="Explain why this order is being cancelled" aria-invalid={Boolean(cancellationError)} aria-describedby={cancellationError ? "cancellation-reason-error" : undefined} required />{cancellationError && <small id="cancellation-reason-error" className="form-error" role="alert">{cancellationError}</small>}</label>}
             <div className="dialog-actions"><button className="shop-secondary" type="button" onClick={() => setPendingOrderAction(null)}>Keep order</button><button className="admin-action destructive-action" type="button" onClick={() => void updateOrder()}>{pendingOrderAction.status === "CANCELLED" ? "Cancel order" : "Confirm change"}</button></div>
           </section>
         </div>

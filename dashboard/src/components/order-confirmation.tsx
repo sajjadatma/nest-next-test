@@ -45,7 +45,7 @@ export function OrderConfirmation({ token }: { token: string }) {
   }, [token]);
   if (error)
     return (
-      <main className="confirmation-page">
+      <main id="main-content" className="confirmation-page">
         <section>
           <p className="shop-kicker">Order confirmation</p>
           <h1>We couldn’t find that order.</h1>
@@ -56,14 +56,14 @@ export function OrderConfirmation({ token }: { token: string }) {
     );
   if (!order)
     return (
-      <main className="confirmation-page">
+      <main id="main-content" className="confirmation-page">
         <section>
           <p>Loading your order…</p>
         </section>
       </main>
     );
   return (
-    <main className="confirmation-page">
+    <main id="main-content" className="confirmation-page">
       <section>
         <p className="shop-kicker">Order received</p>
         <h1>Thank you, {order.shippingAddress.fullName}.</h1>

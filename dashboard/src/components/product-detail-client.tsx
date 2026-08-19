@@ -30,11 +30,11 @@ export function ProductDetailClient({ slug }: { slug: string }) {
     return () => { active = false; };
   }, [slug]);
 
-  if (error) return <main className="product-state"><p className="shop-kicker">Product details</p><h1>We couldn’t find that piece.</h1><p>{error}</p><Link className="shop-cta" href="/shop">Return to collection</Link></main>;
-  if (!product) return <main className="product-state" aria-busy="true"><p>Loading product details…</p></main>;
+  if (error) return <main id="main-content" className="product-state"><p className="shop-kicker">Product details</p><h1>We couldn’t find that piece.</h1><p>{error}</p><Link className="shop-cta" href="/shop">Return to collection</Link></main>;
+  if (!product) return <main id="main-content" className="product-state" aria-busy="true"><p>Loading product details…</p></main>;
   const images = productImages(product);
   return (
-    <main>
+    <main id="main-content">
       <nav className="product-breadcrumbs" aria-label="Breadcrumb"><Link href="/shop">Shop</Link><span>/</span><Link href={`/shop?category=${product.category.slug}`}>{product.category.name}</Link><span>/</span><span aria-current="page">{product.name}</span></nav>
       <div className="product-page">
         <ProductGallery images={images} productName={product.name} />

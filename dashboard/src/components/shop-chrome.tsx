@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useCart } from "@/components/cart-provider";
+import { LanguageSwitcher } from "@/components/language-switcher";
 
 export function ShopHeader() {
   const { itemCount } = useCart();
@@ -53,6 +54,7 @@ export function ShopHeader() {
         <Link href="/shop/account" onClick={closeMenu}>Account</Link>
       </nav>
       <div className="shop-nav-actions">
+        <LanguageSwitcher compact />
         <Link className="bag-button" href="/shop/bag" aria-label={`Shopping bag, ${itemCount} ${itemCount === 1 ? "item" : "items"}`}>
           Bag <span aria-hidden="true">{itemCount}</span>
         </Link>
