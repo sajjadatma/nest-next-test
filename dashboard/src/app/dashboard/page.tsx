@@ -1,1 +1,3 @@
-import{DashboardClient}from"@/components/dashboard-client";export default function Dashboard(){return <DashboardClient/>}
+import { DashboardClient } from "@/components/dashboard-client";
+
+export default function Dashboard() { return <DashboardClient view="overview" />; }

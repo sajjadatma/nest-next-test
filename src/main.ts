@@ -1,12 +1,27 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+import cookieParser = require('cookie-parser');
+import * as Sentry from '@sentry/nestjs';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
+import { RuntimeConfigService } from './config/runtime-config.service';
+import { HttpExceptionFilter } from './observability/http-exception.filter';
+import { SystemLogService } from './system-logs/system-log.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  app.useLogger(app.get(Logger));
+  const config = app.get(RuntimeConfigService);
+  if (config.sentryDsn) Sentry.init({ dsn: config.sentryDsn, environment: config.nodeEnv });
+  app.enableShutdownHooks();
+  (app.getHttpAdapter().getInstance() as { set: (key: string, value: boolean) => void }).set('trust proxy', process.env.TRUST_PROXY === 'true');
   app.setGlobalPrefix('api');
-  app.enableCors({ origin: true, credentials: true });
+  app.use(helmet());
+  app.use(cookieParser());
+  app.enableCors({ credentials: true, origin: (origin: string | undefined, callback: (error: Error | null, allow?: boolean) => void) => { if (!origin || config.frontendOrigins.includes(origin)) return callback(null, true); return callback(new Error('Origin is not allowed by CORS')); } });
+  app.useGlobalFilters(new HttpExceptionFilter(app.get(SystemLogService)));
   app.useGlobalPipes(
     new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: true }),
   );
@@ -21,6 +36,8 @@ async function bootstrap() {
     useGlobalPrefix: true,
     customSiteTitle: 'Nest Dashboard API Docs',
   });
-  await app.listen(process.env.PORT ?? 5050);
+  await app.listen(config.port, config.host);
+  app.get(Logger).log(`Backend is ready: http://${config.host}:${config.port}`, 'Bootstrap');
+  await app.get(SystemLogService).record({ severity: 'info', category: 'runtime', message: 'API started', metadata: { host: config.host, port: config.port, environment: config.nodeEnv } });
 }
 bootstrap();

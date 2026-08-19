@@ -1,0 +1,130 @@
+"use client";
+
+import Link from "next/link";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useForm, type UseFormRegister } from "react-hook-form";
+import { api, clear, restoreSession, token } from "@/lib/api";
+import { money } from "@/components/shop-types";
+import { useTranslation } from "@/i18n/language-provider";
+
+type Profile = { name?: string | null; email: string; profile: { phone?: string | null; avatarUrl?: string | null; locale: string; timezone: string }; preferences: { emailMarketing: boolean; emailOrderUpdates: boolean; smsOrderUpdates: boolean } };
+type Address = { id: string; label?: string | null; type: "SHIPPING" | "BILLING" | "BOTH"; recipientName: string; phone?: string | null; line1: string; line2?: string | null; city: string; region?: string | null; postalCode: string; countryCode: string; isDefaultShipping: boolean; isDefaultBilling: boolean };
+type CustomerOrder = { id: string; number: string; status: string; subtotalMinor?: number; shippingMinor?: number; discountMinor?: number; totalMinor: number; shippingLabel?: string; shippingEta?: string; paymentMethod?: string; createdAt: string; items: { id: string; productName: string; quantity: number; unitPriceMinor?: number }[]; shipments?: { carrier?: string | null; service?: string | null; trackingNumber?: string | null; trackingUrl?: string | null; status: string; shippedAt?: string | null; deliveredAt?: string | null }[]; statusEvents?: { id: string; status: string; reason?: string | null; createdAt: string }[]; payments?: { status: string; amountMinor: number; currency?: string; methodType: string; paidAt?: string | null }[] };
+type AddressForm = { label: string; recipientName: string; line1: string; line2: string; city: string; region: string; postalCode: string; countryCode: string; phone: string };
+type PreferencesForm = { emailOrderUpdates: boolean; emailMarketing: boolean; smsOrderUpdates: boolean };
+export type AccountView = "overview" | "orders" | "addresses" | "preferences";
+type AddressModal = "edit" | "save-confirm" | "delete-confirm" | null;
+
+// Keep the form compatible with the API's ISO 3166-1 alpha-2 countryCode field,
+// while giving customers a real, searchable-by-keyboard native selector.
+const countryCodes = "AF AL DZ AS AD AO AI AQ AG AR AM AW AU AT AZ BS BH BD BB BY BE BZ BJ BM BT BO BQ BA BW BV BR IO BN BG BF BI CV KH CM CA KY CF TD CL CN CX CC CO KM CG CD CK CR CI HR CU CW CY CZ DK DJ DM DO EC EG SV GQ ER EE SZ ET FK FO FJ FI FR GF PF TF GA GM GE DE GH GI GR GL GD GP GU GT GG GN GW GY HT HM VA HN HK HU IS IN ID IR IQ IE IM IL IT JM JP JE JO KZ KE KI KP KR KW KG LA LV LB LS LR LY LI LT LU MO MG MW MY MV ML MT MH MQ MR MU YT MX FM MD MC MN ME MS MA MZ MM NA NR NP NL NC NZ NI NE NG NU NF MK MP NO OM PK PW PS PA PG PY PE PH PN PL PT PR QA RE RO RU RW BL SH KN LC MF PM VC WS SM ST SA SN RS SC SL SG SX SK SI SB SO ZA GS SS ES LK SD SR SJ SE CH SY TW TJ TZ TH TL TG TK TO TT TN TR TM TC TV UG UA AE GB US UM UY UZ VU VE VN VG VI WF EH YE ZM ZW".split(" ");
+
+type CountryFieldProps = { register: UseFormRegister<AddressForm>; countryNames: Record<string, string>; orderedCodes: string[]; id: string };
+
+function CountryField({ register, countryNames, orderedCodes, id }: CountryFieldProps) {
+  return <label htmlFor={id}>Country<select id={id} autoComplete="country" {...register("countryCode", { required: "Country is required" })}><option value="" disabled>Select a country</option>{orderedCodes.map((code) => <option key={code} value={code}>{countryNames[code] || code} ({code})</option>)}</select></label>;
+}
+
+const orderStatusLabels: Record<string, string> = { PENDING: "Order received", CONFIRMED: "Confirmed", PACKING: "Preparing", SHIPPED: "On the way", DELIVERED: "Delivered", FULFILLED: "Complete", CANCELLED: "Cancelled" };
+export function CustomerAccountClient({ view = "overview", orderId }: { view?: AccountView; orderId?: string }) {
+  const router = useRouter();
+  const { locale } = useTranslation();
+  const countryNames = useMemo(() => {
+    try {
+      const displayNames = new Intl.DisplayNames([locale, "en"], { type: "region" });
+      return Object.fromEntries(countryCodes.map((code) => [code, displayNames.of(code) || code]));
+    } catch {
+      return Object.fromEntries(countryCodes.map((code) => [code, code]));
+    }
+  }, [locale]);
+  const orderedCountryCodes = useMemo(() => [...countryCodes].sort((a, b) => (countryNames[a] || a).localeCompare(countryNames[b] || b, locale)), [countryNames, locale]);
+  const [account, setAccount] = useState<Profile | null>(null);
+  const [orders, setOrders] = useState<CustomerOrder[]>([]);
+  const [selectedOrder, setSelectedOrder] = useState<CustomerOrder | null>(null);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [editingAddress, setEditingAddress] = useState<Address | null>(null);
+  const [addressModal, setAddressModal] = useState<AddressModal>(null);
+  const [pendingAddressValues, setPendingAddressValues] = useState<AddressForm | null>(null);
+  const [pendingDeleteAddress, setPendingDeleteAddress] = useState<Address | null>(null);
+  const [avatarSaving, setAvatarSaving] = useState(false);
+  const addressModalRef = useRef<HTMLDivElement>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const { register, handleSubmit, reset, formState: { isSubmitting } } = useForm<AddressForm>({ defaultValues: { label: "", recipientName: "", line1: "", line2: "", city: "", region: "", postalCode: "", countryCode: "US", phone: "" } });
+  const preferencesForm = useForm<PreferencesForm>({ defaultValues: { emailOrderUpdates: true, emailMarketing: false, smsOrderUpdates: false } });
+  const { reset: resetPreferences } = preferencesForm;
+
+  const load = useCallback(async () => {
+    if (!token() && !await restoreSession()) { router.replace("/login?redirect=%2Fshop%2Faccount"); return; }
+    const [profile, orderPage, savedAddresses, detail] = await Promise.all([api<Profile>("/account/profile"), api<{ items: CustomerOrder[] }>("/account/orders"), api<Address[]>("/account/addresses"), orderId ? api<CustomerOrder>(`/account/orders/${orderId}`) : Promise.resolve(null)]);
+    setAccount(profile); setOrders(orderPage.items); setAddresses(savedAddresses); setSelectedOrder(detail); resetPreferences(profile.preferences);
+  }, [orderId, resetPreferences, router]);
+  useEffect(() => { queueMicrotask(() => { void load().catch((reason) => setError(reason instanceof Error ? reason.message : "We could not load your account.")).finally(() => setLoading(false)); }); }, [load]);
+  useEffect(() => {
+    if (!addressModal) return;
+    addressModalRef.current?.querySelector<HTMLElement>("button, input, select")?.focus();
+    function closeOnEscape(event: KeyboardEvent) { if (event.key === "Escape") { setAddressModal(null); setPendingAddressValues(null); setPendingDeleteAddress(null); } }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [addressModal]);
+
+  async function saveAddress(values: AddressForm) {
+    const payload = { ...values, type: editingAddress?.type ?? "BOTH", isDefaultShipping: editingAddress?.isDefaultShipping ?? addresses.length === 0, isDefaultBilling: editingAddress?.isDefaultBilling ?? addresses.length === 0 };
+    try {
+      if (editingAddress) {
+        const updated = await api<Address>(`/account/addresses/${editingAddress.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+        setAddresses((current) => current.map((address) => address.id === updated.id ? updated : address));
+        setMessage("Address updated.");
+      } else {
+        const created = await api<Address>("/account/addresses", { method: "POST", body: JSON.stringify(payload) });
+        setAddresses((current) => [...current, created]);
+        setMessage("Address saved.");
+      }
+      setEditingAddress(null); setAddressModal(null); setPendingAddressValues(null); reset();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save address."); }
+  }
+  function editAddress(address: Address) { setEditingAddress(address); reset({ label: address.label ?? "", recipientName: address.recipientName, line1: address.line1, line2: address.line2 ?? "", city: address.city, region: address.region ?? "", postalCode: address.postalCode, countryCode: address.countryCode, phone: address.phone ?? "" }); setAddressModal("edit"); }
+  function cancelAddressEdit() { setEditingAddress(null); setAddressModal(null); setPendingAddressValues(null); setPendingDeleteAddress(null); reset(); }
+  function requestSaveAddress(values: AddressForm) { setPendingAddressValues(values); setAddressModal("save-confirm"); }
+  async function confirmRemoveAddress() { if (!pendingDeleteAddress) return; try { await api(`/account/addresses/${pendingDeleteAddress.id}`, { method: "DELETE" }); setAddresses((current) => current.filter((item) => item.id !== pendingDeleteAddress.id)); if (editingAddress?.id === pendingDeleteAddress.id) cancelAddressEdit(); setPendingDeleteAddress(null); setAddressModal(null); setMessage("Address removed."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not remove address."); } }
+  async function savePreferences(values: PreferencesForm) { try { const preferences = await api<Profile["preferences"]>("/account/preferences", { method: "PATCH", body: JSON.stringify(values) }); setAccount((current) => current ? { ...current, preferences } : current); setMessage("Preferences saved."); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save preferences."); } }
+  async function saveAvatar(file: File) {
+    if (!file.type.startsWith("image/")) { setError("Choose an image file."); return; }
+    if (file.size > 1_500_000) { setError("Choose an image smaller than 1.5 MB."); return; }
+    setAvatarSaving(true); setError("");
+    try {
+      const avatarUrl = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Could not read image.")); reader.onerror = () => reject(new Error("Could not read image.")); reader.readAsDataURL(file); });
+      const updated = await api<Profile>("/account/profile", { method: "PATCH", body: JSON.stringify({ avatarUrl }) });
+      setAccount(updated); setMessage("Profile photo updated.");
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not update profile photo."); } finally { setAvatarSaving(false); }
+  }
+  function signOut() { void api("/auth/logout", { method: "POST" }).catch(() => undefined); clear(); router.replace("/shop"); }
+
+  if (loading) return <main id="main-content" className="account-page" aria-busy="true"><p className="shop-kicker">Your account</p><h1>Loading your account…</h1></main>;
+  if (!account) return <main id="main-content" className="account-page"><div className="account-state error" role="alert"><p>{error || "We could not load your account."}</p><Link className="shop-primary" href="/login?redirect=%2Fshop%2Faccount">Sign in again</Link></div></main>;
+  const firstName = account.name?.split(" ")[0] || "there";
+  return <main id="main-content" className="account-dashboard">
+    <aside className="account-dashboard-sidebar" aria-label="Account navigation">
+      <div className="account-dashboard-person"><label className="account-avatar-upload"><span className="account-avatar-preview">{account.profile.avatarUrl ? <Image src={account.profile.avatarUrl} alt="" width={48} height={48} unoptimized /> : firstName[0]?.toUpperCase()}</span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => { const file = event.target.files?.[0]; if (file) void saveAvatar(file); event.currentTarget.value = ""; }} disabled={avatarSaving} /><span className="account-avatar-action">{avatarSaving ? "Uploading…" : "Add photo"}</span></label><div><strong>{account.name || "NEST customer"}</strong><small>{account.email}</small></div></div>
+      <nav className="account-dashboard-nav" aria-label="Account sections"><Link className={view === "overview" ? "active" : ""} href="/shop/account">Overview</Link><Link className={view === "orders" ? "active" : ""} href="/shop/account/orders">Orders</Link><Link className={view === "addresses" ? "active" : ""} href="/shop/account/addresses">Addresses</Link><Link className={view === "preferences" ? "active" : ""} href="/shop/account/preferences">Preferences</Link></nav>
+      <div className="account-dashboard-sidebar-bottom"><button type="button" onClick={signOut}>Sign out</button></div>
+    </aside>
+    <div className="account-dashboard-workspace">
+      <header className="account-dashboard-header"><div><p className="shop-kicker">Account centre</p><h1>Welcome back, {firstName}.</h1></div><Link className="shop-secondary" href="/shop#collection">Shop collection</Link></header>
+      <div className="account-dashboard-content">
+        {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}
+        <section className="account-dashboard-hero"><div><p className="shop-kicker">Your NEST account</p><h2>{view === "overview" ? "Your next purchase, made easier." : orderId ? `Order ${selectedOrder?.number ?? "details"}` : view === "orders" ? "Your order history." : view === "addresses" ? "Delivery details, ready when you are." : "Choose how we keep in touch."}</h2><p>{view === "overview" ? "Everything you need for a smooth next order, in one calm and considered place." : orderId ? "A complete record of what you ordered, when you placed it, and where it is now." : "Use the account navigation to move between your customer details, keeping each task focused and easy to complete."}</p></div><dl><div><dt>Orders</dt><dd>{orders.length}</dd></div><div><dt>Addresses</dt><dd>{addresses.length}</dd></div></dl></section>
+        <div className="account-dashboard-grid">
+          {view === "overview" && <section className="account-overview" aria-label="Account overview"><div className="account-overview-heading"><div><p className="shop-kicker">At a glance</p><h2>Ready for what’s next.</h2></div><p>Your recent activity and the few details that make checkout simple.</p></div><div className="account-overview-grid"><Link className="account-overview-card account-overview-order" href="/shop/account/orders"><span className="account-overview-label">Latest order</span>{orders[0] ? <><strong>{orders[0].number}</strong><small>{orderStatusLabels[orders[0].status] ?? orders[0].status} · {new Date(orders[0].createdAt).toLocaleDateString()}</small></> : <><strong>Nothing ordered yet</strong><small>Explore the collection when you are ready.</small></>}<span className="account-overview-link">View orders <span aria-hidden="true">→</span></span></Link><Link className="account-overview-card" href="/shop/account/addresses"><span className="account-overview-label">Delivery</span><strong>{addresses.length ? `${addresses.length} saved ${addresses.length === 1 ? "address" : "addresses"}` : "Add a delivery address"}</strong><small>{addresses.length ? "Your checkout details are ready to use." : "Save one now for a faster checkout."}</small><span className="account-overview-link">Manage addresses <span aria-hidden="true">→</span></span></Link><Link className="account-overview-card" href="/shop/account/preferences"><span className="account-overview-label">Preferences</span><strong>{[account.preferences.emailOrderUpdates, account.preferences.emailMarketing, account.preferences.smsOrderUpdates].filter(Boolean).length} updates enabled</strong><small>Choose the order and product news you receive.</small><span className="account-overview-link">Edit preferences <span aria-hidden="true">→</span></span></Link></div></section>}
+          {view === "orders" && (orderId && selectedOrder ? <section className="account-order-detail" aria-labelledby="order-detail-title"><Link className="account-order-back" href="/shop/account/orders">← Back to orders</Link><header><div><p className="shop-kicker">Order details</p><h2 id="order-detail-title">{selectedOrder.number}</h2><p>Placed {new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "short" }).format(new Date(selectedOrder.createdAt))}</p></div><span className={`order-status ${selectedOrder.status.toLowerCase()}`}>{orderStatusLabels[selectedOrder.status] ?? selectedOrder.status}</span></header><div className="account-order-detail-grid"><section><h3>Items in this order</h3><div className="account-order-detail-items">{selectedOrder.items.map((item) => <div key={item.id}><span><strong>{item.productName}</strong><small>{item.quantity} {item.quantity === 1 ? "item" : "items"}</small></span><strong>{money((item.unitPriceMinor ?? 0) * item.quantity, selectedOrder.payments?.[0]?.currency)}</strong></div>)}</div></section><aside><section><p className="account-overview-label">Delivery</p><strong>{selectedOrder.shippingLabel || "Standard delivery"}</strong><p>{selectedOrder.shippingEta || "Delivery timing will be confirmed soon."}</p>{selectedOrder.shipments?.[0] && <p className="account-order-tracking">{selectedOrder.shipments[0].trackingNumber ? <>Tracking: {selectedOrder.shipments[0].trackingNumber}</> : "Tracking will appear when your order ships."}</p>}</section><section><p className="account-overview-label">Payment</p><strong>{selectedOrder.payments?.[0]?.methodType?.replaceAll("_", " ") || selectedOrder.paymentMethod?.replaceAll("_", " ") || "Payment pending"}</strong><p>{selectedOrder.payments?.[0]?.status || "Pending"}</p></section><section className="account-order-total"><span>Total paid</span><strong>{money(selectedOrder.totalMinor, selectedOrder.payments?.[0]?.currency)}</strong></section></aside></div>{selectedOrder.statusEvents?.length ? <section className="account-order-timeline"><h3>Order updates</h3><ol>{selectedOrder.statusEvents.map((event) => <li key={event.id}><span aria-hidden="true" /><div><strong>{orderStatusLabels[event.status] ?? event.status}</strong><small>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.createdAt))}{event.reason ? ` · ${event.reason}` : ""}</small></div></li>)}</ol></section> : null}</section> : <section id="orders" className="account-dashboard-card account-dashboard-card-wide" aria-labelledby="orders-title"><div className="account-dashboard-card-heading"><div><p className="shop-kicker">Your history</p><h2 id="orders-title">Recent orders</h2></div><span>{orders.length} {orders.length === 1 ? "order" : "orders"}</span></div>{orders.length ? <div className="account-orders">{orders.map((order) => <article key={order.id}><div><Link className="account-order-number" href={`/shop/account/orders/${order.id}`}>{order.number}</Link><small>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(order.createdAt))}</small></div><p>{order.items.map((item) => `${item.quantity} × ${item.productName}`).join(", ")}</p><div><span className={`order-status ${order.status.toLowerCase()}`}>{orderStatusLabels[order.status] ?? order.status}</span><strong>{money(order.totalMinor)}</strong><Link className="text-button" href={`/shop/account/orders/${order.id}`}>View details</Link></div></article>)}</div> : <div className="account-state"><h3>No orders yet.</h3><p>Orders placed while signed in will appear here.</p><Link className="shop-secondary" href="/shop#collection">Explore the collection</Link></div>}</section>)}
+          {view === "addresses" && <section id="addresses" className="account-dashboard-card account-dashboard-card-wide"><div className="account-dashboard-card-heading"><div><p className="shop-kicker">Delivery</p><h2>Saved addresses</h2></div><span>{addresses.length} saved</span></div><div className="account-addresses">{addresses.length ? addresses.map((address) => <article key={address.id}><strong>{address.label || address.recipientName}</strong><small>{address.isDefaultShipping ? "Default shipping" : "Saved address"}</small><p>{address.line1}{address.line2 && <><br />{address.line2}</>}<br />{address.city}{address.region && `, ${address.region}`}, {address.postalCode}, {countryNames[address.countryCode.toUpperCase()] || address.countryCode}</p><div className="account-address-actions"><button className="text-button" type="button" onClick={() => editAddress(address)}>Edit</button><button className="danger-text-button" type="button" onClick={() => { setPendingDeleteAddress(address); setAddressModal("delete-confirm"); }}>Remove</button></div></article>) : <p className="manager-note">Save an address to make checkout faster.</p>}</div><form className="account-address-form" onSubmit={handleSubmit(saveAddress)}><div className="account-address-form-heading"><h3>Add an address</h3></div><label>Address label <span>(optional)</span><input placeholder="Home, work, or another place" {...register("label")} /></label><div className="checkout-two"><label>Recipient<input {...register("recipientName", { required: true })} /></label><label>Phone<input type="tel" {...register("phone")} /></label></div><label>Street address<input {...register("line1", { required: true })} /></label><label>Address line 2 <span>(optional)</span><input {...register("line2")} /></label><div className="checkout-two"><label>City<input {...register("city", { required: true })} /></label><label>Region <span>(optional)</span><input {...register("region")} /></label></div><div className="checkout-two"><label>Postal code<input {...register("postalCode", { required: true })} /></label><CountryField id="add-country-code" register={register} countryNames={countryNames} orderedCodes={orderedCountryCodes} /></div><button className="shop-primary" disabled={isSubmitting}>{isSubmitting ? "Saving…" : "Save address"}</button></form></section>}
+          {view === "preferences" && <section id="preferences" className="account-dashboard-card"><p className="shop-kicker">Preferences</p><h2>Communication</h2><form className="account-preferences" onSubmit={preferencesForm.handleSubmit(savePreferences)}><label><input type="checkbox" {...preferencesForm.register("emailOrderUpdates")} /> Email order updates</label><label><input type="checkbox" {...preferencesForm.register("emailMarketing")} /> Product and collection news</label><label><input type="checkbox" {...preferencesForm.register("smsOrderUpdates")} /> SMS delivery updates</label><button className="shop-secondary" disabled={preferencesForm.formState.isSubmitting}>{preferencesForm.formState.isSubmitting ? "Saving…" : "Save preferences"}</button></form></section>}
+        </div>
+        {addressModal && <div className="account-modal-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) cancelAddressEdit(); }}><div ref={addressModalRef} className="account-modal" role="dialog" aria-modal="true" aria-labelledby="account-modal-title"><button className="account-modal-close" type="button" aria-label="Close dialog" onClick={cancelAddressEdit}>×</button>{addressModal === "edit" && <><p className="shop-kicker">Saved address</p><h2 id="account-modal-title">Edit address</h2><p className="account-modal-copy">Update the delivery details for this saved address.</p><form className="account-address-form account-modal-form" onSubmit={handleSubmit(requestSaveAddress)}><label>Address label <span>(optional)</span><input placeholder="Home, work, or another place" {...register("label")} /></label><div className="checkout-two"><label>Recipient<input {...register("recipientName", { required: true })} /></label><label>Phone<input type="tel" {...register("phone")} /></label></div><label>Street address<input {...register("line1", { required: true })} /></label><label>Address line 2 <span>(optional)</span><input {...register("line2")} /></label><div className="checkout-two"><label>City<input {...register("city", { required: true })} /></label><label>Region <span>(optional)</span><input {...register("region")} /></label></div><div className="checkout-two"><label>Postal code<input {...register("postalCode", { required: true })} /></label><CountryField id="edit-country-code" register={register} countryNames={countryNames} orderedCodes={orderedCountryCodes} /></div><div className="account-modal-actions"><button className="shop-secondary" type="button" onClick={cancelAddressEdit}>Cancel</button><button className="shop-primary" type="submit">Review changes</button></div></form></>}{addressModal === "save-confirm" && <><p className="shop-kicker">Confirm changes</p><h2 id="account-modal-title">Save address changes?</h2><p className="account-modal-copy">Your updated delivery details will be used the next time you check out.</p><div className="account-modal-actions"><button className="shop-secondary" type="button" onClick={() => { setAddressModal("edit"); }}>Go back</button><button className="shop-primary" type="button" onClick={() => pendingAddressValues && void saveAddress(pendingAddressValues)}>Save changes</button></div></>}{addressModal === "delete-confirm" && pendingDeleteAddress && <><p className="shop-kicker">Remove address</p><h2 id="account-modal-title">Remove this address?</h2><p className="account-modal-copy">“{pendingDeleteAddress.label || pendingDeleteAddress.recipientName}” will be removed from your saved delivery details. This cannot be undone.</p><div className="account-modal-actions"><button className="shop-secondary" type="button" onClick={() => { setPendingDeleteAddress(null); setAddressModal(null); }}>Keep address</button><button className="danger-text-button account-modal-danger" type="button" onClick={() => void confirmRemoveAddress()}>Remove address</button></div></>}</div></div>}
+      </div>
+    </div>
+  </main>;
+}
