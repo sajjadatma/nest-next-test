@@ -52,6 +52,7 @@ export function B2bShell({ children, title, eyebrow = "B2B workspace", active }:
     ["variants", t("Variants"), "/dashboard/shop/b2b/variants"],
     ["groups", t("Customer groups"), "/dashboard/shop/b2b/customer-groups"],
     ["lists", t("Price lists"), "/dashboard/shop/b2b/price-lists"],
+    ["orders", t("B2B orders"), "/dashboard/shop/b2b/orders"],
   ];
   return <>
     <a className="skip-link" href="#b2b-main">{t("Skip to main content")}</a>

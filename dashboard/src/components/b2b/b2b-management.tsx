@@ -6,10 +6,10 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { B2bShell, B2bState, formatB2bMoney } from "@/components/b2b/b2b-shell";
-import type { Company, CompanyRole, CustomerGroup, Membership, PriceList, Variant } from "@/components/b2b/types";
+import type { B2bOrder, Company, CompanyRole, CustomerGroup, Membership, PriceList, Variant } from "@/components/b2b/types";
 import { useTranslation } from "@/i18n/language-provider";
 
-type Section = "companies" | "variants" | "groups" | "lists";
+type Section = "companies" | "variants" | "groups" | "lists" | "orders";
 const roleOptions: CompanyRole[] = ["OWNER", "ADMIN", "BUYER", "VIEWER"];
 
 function ErrorNotice({ error }: { error: string }) { return error ? <p className="notice error" role="alert">{error}</p> : null; }
@@ -17,13 +17,13 @@ function SuccessNotice({ message }: { message: string }) { return message ? <p c
 function Badge({ value }: { value: string }) { return <span className={`b2b-badge ${value.toLowerCase()}`}>{value}</span>; }
 
 export function B2bManagementPage({ section }: { section: Section }) {
-  const titles = { companies: "Companies", variants: "Variants", groups: "Customer groups", lists: "Price lists" } as const;
-  return <B2bShell title={titles[section]} active={section === "groups" ? "groups" : section === "lists" ? "lists" : section}><section className="b2b-overview-section"><div className="b2b-stat-grid"><div className="metric-card"><span>{section === "companies" ? "Companies" : section === "variants" ? "Variants" : section === "groups" ? "Customer groups" : "Price lists"}</span><strong><SectionCount section={section} /></strong></div><div className="metric-card"><span>Phase 1 status</span><strong className="b2b-status-text">Ready</strong></div></div>{section === "companies" && <CompaniesPanel />}{section === "variants" && <VariantsPanel />}{section === "groups" && <GroupsPanel />}{section === "lists" && <PriceListsPanel />}</section></B2bShell>;
+  const titles = { companies: "Companies", variants: "Variants", groups: "Customer groups", lists: "Price lists", orders: "B2B orders" } as const;
+  return <B2bShell title={titles[section]} active={section === "groups" ? "groups" : section === "lists" ? "lists" : section === "orders" ? "orders" : section}><section className="b2b-overview-section"><div className="b2b-stat-grid"><div className="metric-card"><span>{titles[section]}</span><strong><SectionCount section={section} /></strong></div><div className="metric-card"><span>Phase 2 status</span><strong className="b2b-status-text">Active</strong></div></div>{section === "companies" && <CompaniesPanel />}{section === "variants" && <VariantsPanel />}{section === "groups" && <GroupsPanel />}{section === "lists" && <PriceListsPanel />}{section === "orders" && <OrdersPanel />}</section></B2bShell>;
 }
 
 function SectionCount({ section }: { section: Section }) {
   const [count, setCount] = useState("—");
-  useEffect(() => { let mounted = true; const path = section === "companies" ? "/shop/admin/b2b/companies" : section === "variants" ? "/shop/admin/b2b/variants" : section === "groups" ? "/shop/admin/b2b/customer-groups" : "/shop/admin/b2b/price-lists"; void api<unknown[]>(path).then((items) => { if (mounted) setCount(String(items.length)); }).catch(() => undefined); return () => { mounted = false; }; }, [section]);
+  useEffect(() => { let mounted = true; const path = section === "companies" ? "/shop/admin/b2b/companies" : section === "variants" ? "/shop/admin/b2b/variants" : section === "groups" ? "/shop/admin/b2b/customer-groups" : section === "lists" ? "/shop/admin/b2b/price-lists" : "/shop/admin/b2b/orders"; void api<unknown[]>(path).then((items) => { if (mounted) setCount(String(items.length)); }).catch(() => undefined); return () => { mounted = false; }; }, [section]);
   return count;
 }
 
@@ -61,6 +61,15 @@ function PriceListsPanel() {
   useEffect(() => { void load(); }, []);
   async function create(event: FormEvent) { event.preventDefault(); setSaving(true); setError(""); try { await api("/shop/admin/b2b/price-lists", { method: "POST", body: JSON.stringify({ ...form, priority: Number(form.priority) }) }); setMessage(t("Price list created.")); setForm((current) => ({ ...current, name: "", code: "" })); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : t("Could not create price list.")); } finally { setSaving(false); } }
   return <><ErrorNotice error={error} /><SuccessNotice message={message} /><div className="management-split"><section className="content-card"><div className="section-heading"><div><p className="eyebrow">{t("Commercial rules")}</p><h2>{t("Create price list")}</h2></div></div>{groups.length ? <form className="b2b-form" onSubmit={create}><div className="b2b-form-grid"><label>{t("List name")}<input required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label>{t("Code")}<input value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} /></label><label>{t("Currency")}<input required maxLength={3} value={form.currency} onChange={(event) => setForm({ ...form, currency: event.target.value.toUpperCase() })} /></label><label>{t("Priority")}<input type="number" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })} /></label></div><label>{t("Customer group")}<select value={form.customerGroupId} onChange={(event) => setForm({ ...form, customerGroupId: event.target.value })}>{groups.map((group) => <option key={group.id} value={group.id}>{group.name} · {group.code}</option>)}</select></label><button className="admin-action" disabled={saving}>{saving ? t("Creating…") : t("Create price list")}</button></form> : <p className="manager-note">{t("Create a customer group before adding a price list.")}</p>}</section><section className="content-card"><div className="section-heading"><div><p className="eyebrow">{t("Effective pricing")}</p><h2>{t("Price lists")}</h2></div></div>{items.length ? <div className="management-list">{items.map((item) => <div key={item.id}><span><strong>{item.name}</strong><small>{item.code} · {item.customerGroup?.name ?? t("Customer group")} · {item.items?.length ?? 0} {t("items")}</small></span><b>{item.currency} · P{item.priority}</b></div>)}</div> : !error && <p className="manager-note">{t("No price lists yet.")}</p>}</section></div></>;
+}
+
+function OrdersPanel() {
+  const { t } = useTranslation();
+  const [items, setItems] = useState<B2bOrder[]>([]); const [error, setError] = useState(""); const [message, setMessage] = useState("");
+  async function load() { try { setItems(await api<B2bOrder[]>("/shop/admin/b2b/orders")); setError(""); } catch (reason) { setError(reason instanceof Error ? reason.message : t("Could not load B2B orders.")); } }
+  useEffect(() => { void load(); }, []);
+  async function update(order: B2bOrder, status: B2bOrder["status"]) { try { await api(`/shop/admin/b2b/orders/${order.id}/status`, { method: "PATCH", body: JSON.stringify({ status }) }); setMessage(t("Order status updated.")); await load(); } catch (reason) { setError(reason instanceof Error ? reason.message : t("Could not update order status.")); } }
+  return <><ErrorNotice error={error} /><SuccessNotice message={message} /><section className="content-card"><div className="section-heading"><div><p className="eyebrow">{t("Fulfilment workspace")}</p><h2>{t("B2B orders")}</h2></div><span className="b2b-muted">{t("Manual payment pending")}</span></div>{items.length ? <div className="table-wrap"><table className="data-table"><thead><tr><th>{t("Order")}</th><th>{t("Company")}</th><th>{t("Requester")}</th><th>{t("Total")}</th><th>{t("Status")}</th></tr></thead><tbody>{items.map((order) => <tr key={order.id}><td><strong>{order.number}</strong><small>{new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(order.createdAt))}</small></td><td>{order.company?.name ?? "—"}</td><td>{order.createdBy?.name ?? order.createdBy?.email ?? "—"}</td><td>{formatB2bMoney(order.totalMinor, order.currency)}</td><td><select aria-label={`${t("Status")} ${order.number}`} value={order.status} onChange={(event) => void update(order, event.target.value as B2bOrder["status"])}>{(["PENDING", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED"] as const).map((status) => <option key={status} value={status}>{t(status)}</option>)}</select></td></tr>)}</tbody></table></div> : !error && <B2bState title={t("No B2B orders yet")} detail={t("Approved company requests will appear here for fulfilment.")} />}</section></>;
 }
 
 export function CompanyMembersPage({ companyId }: { companyId: string }) {

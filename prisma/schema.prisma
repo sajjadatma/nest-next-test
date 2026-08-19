@@ -36,6 +36,10 @@ model User {
   savedPaymentMethods SavedPaymentMethod[]
   deletionRequests    AccountDeletionRequest[]
   companyMemberships  CompanyMembership[]
+  b2bCarts            B2bCart[]
+  b2bPurchaseRequests B2bPurchaseRequest[] @relation("B2bPurchaseRequester")
+  b2bReviewedRequests B2bPurchaseRequest[] @relation("B2bPurchaseReviewer")
+  b2bOrders           B2bOrder[]
 }
 
 model UserProfile {
@@ -200,6 +204,10 @@ model Company {
   updatedAt             DateTime            @updatedAt
   customerGroup         CustomerGroup?      @relation(fields: [customerGroupId], references: [id], onDelete: SetNull)
   memberships           CompanyMembership[]
+  b2bCarts              B2bCart[]
+  addresses             CompanyAddress[]
+  b2bPurchaseRequests   B2bPurchaseRequest[]
+  b2bOrders             B2bOrder[]
 
   @@index([status, updatedAt])
   @@index([customerGroupId])
@@ -219,6 +227,126 @@ model CompanyMembership {
   @@unique([companyId, userId])
   @@index([userId, status])
   @@index([companyId, status, role])
+}
+
+model CompanyAddress {
+  id                  String   @id @default(cuid())
+  companyId           String
+  label               String?
+  recipientName       String
+  phone               String?
+  line1               String
+  line2               String?
+  city                String
+  region              String?
+  postalCode          String
+  countryCode         String
+  isDefaultShipping   Boolean  @default(false)
+  isDefaultBilling    Boolean  @default(false)
+  archivedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  company             Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, archivedAt, updatedAt])
+  @@index([companyId, isDefaultShipping, archivedAt])
+  @@index([companyId, isDefaultBilling, archivedAt])
+}
+
+enum B2bPurchaseRequestStatus {
+  SUBMITTED
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum B2bOrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model B2bPurchaseRequest {
+  id                 String                    @id @default(cuid())
+  companyId          String
+  requesterId        String
+  reviewedById       String?
+  status             B2bPurchaseRequestStatus @default(SUBMITTED)
+  currency           String
+  shippingAddress    Json
+  subtotalMinor      Int
+  notes              String?
+  rejectionReason    String?
+  reviewedAt         DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+  company            Company                   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  requester          User                      @relation("B2bPurchaseRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  reviewedBy         User?                     @relation("B2bPurchaseReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  lines              B2bPurchaseRequestLine[]
+  order              B2bOrder?
+
+  @@index([companyId, status, createdAt])
+  @@index([requesterId, createdAt])
+}
+
+model B2bPurchaseRequestLine {
+  id                  String              @id @default(cuid())
+  purchaseRequestId   String
+  variantId           String
+  sku                 String
+  productName         String
+  quantity            Int
+  unitPriceMinor      Int
+  subtotalMinor       Int
+  priceSource         String
+  purchaseRequest     B2bPurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Cascade)
+  variant             ProductVariant      @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseRequestId])
+  @@index([variantId])
+}
+
+model B2bOrder {
+  id                String          @id @default(cuid())
+  number            String          @unique
+  companyId         String
+  purchaseRequestId String          @unique
+  createdById       String
+  status            B2bOrderStatus  @default(PENDING)
+  paymentStatus     String          @default("PENDING_MANUAL")
+  currency          String
+  shippingAddress   Json
+  subtotalMinor     Int
+  shippingMinor     Int             @default(0)
+  totalMinor        Int
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  company           Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  purchaseRequest   B2bPurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
+  createdBy         User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  lines             B2bOrderLine[]
+
+  @@index([companyId, status, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model B2bOrderLine {
+  id          String       @id @default(cuid())
+  orderId     String
+  variantId   String
+  sku         String
+  productName String
+  quantity    Int
+  unitPriceMinor Int
+  subtotalMinor Int
+  order       B2bOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([variantId])
 }
 
 model CustomerGroup {
@@ -256,6 +384,9 @@ model ProductVariant {
   updatedAt         DateTime        @updatedAt
   product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
   priceListItems    PriceListItem[]
+  b2bCartLines      B2bCartLine[]
+  b2bPurchaseRequestLines B2bPurchaseRequestLine[]
+  b2bOrderLines      B2bOrderLine[]
 
   @@index([productId, isActive, position])
   @@index([isActive, sku])
@@ -306,6 +437,36 @@ model PriceTier {
 
   @@unique([priceListItemId, minimumQuantity])
   @@index([priceListItemId, minimumQuantity])
+}
+
+model B2bCart {
+  id         String        @id @default(cuid())
+  companyId  String
+  userId     String
+  currency   String        @default("USD")
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  company    Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lines      B2bCartLine[]
+
+  @@unique([companyId, userId, currency])
+  @@index([userId, updatedAt])
+  @@index([companyId, updatedAt])
+}
+
+model B2bCartLine {
+  id        String         @id @default(cuid())
+  cartId    String
+  variantId String
+  quantity  Int
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  cart      B2bCart        @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@unique([cartId, variantId])
+  @@index([variantId])
 }
 
 model ProductImage {

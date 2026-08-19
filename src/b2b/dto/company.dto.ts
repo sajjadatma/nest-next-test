@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsIn, IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
 
 export const COMPANY_ROLES = ['OWNER', 'ADMIN', 'BUYER', 'VIEWER'] as const;
 export type CompanyRole = (typeof COMPANY_ROLES)[number];
@@ -30,4 +30,18 @@ export class AddCompanyMemberDto {
 export class UpdateCompanyMemberDto {
   @IsOptional() @IsIn(COMPANY_ROLES) role?: CompanyRole;
   @IsOptional() @IsIn(['ACTIVE', 'SUSPENDED', 'REMOVED']) status?: 'ACTIVE' | 'SUSPENDED' | 'REMOVED';
+}
+
+export class SaveCompanyAddressDto {
+  @IsOptional() @IsString() @MaxLength(80) label?: string;
+  @IsString() @Length(2, 160) recipientName!: string;
+  @IsOptional() @IsString() @MaxLength(30) phone?: string;
+  @IsString() @Length(2, 180) line1!: string;
+  @IsOptional() @IsString() @MaxLength(180) line2?: string;
+  @IsString() @Length(2, 100) city!: string;
+  @IsOptional() @IsString() @MaxLength(100) region?: string;
+  @IsString() @Length(2, 30) postalCode!: string;
+  @IsString() @Length(2, 3) countryCode!: string;
+  @IsOptional() @IsBoolean() isDefaultShipping?: boolean;
+  @IsOptional() @IsBoolean() isDefaultBilling?: boolean;
 }

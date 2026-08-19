@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { PrismaClient } from '@prisma/client';
 
@@ -19,6 +20,8 @@ describe('PostgreSQL database integration', () => {
   });
 
   beforeEach(async () => {
+    await prisma.b2bCartLine.deleteMany();
+    await prisma.b2bCart.deleteMany();
     await prisma.priceTier.deleteMany();
     await prisma.priceListItem.deleteMany();
     await prisma.priceList.deleteMany();
@@ -101,5 +104,20 @@ describe('PostgreSQL database integration', () => {
     const item = await prisma.priceListItem.create({ data: { priceListId: priceList.id, variantId: variant.id, priceMinor: 1000 } });
     await prisma.priceTier.create({ data: { priceListItemId: item.id, minimumQuantity: 10, unitPriceMinor: 850 } });
     await expect(prisma.priceTier.create({ data: { priceListItemId: item.id, minimumQuantity: 10, unitPriceMinor: 800 } })).rejects.toMatchObject({ code: 'P2002' });
+  });
+
+  it('scopes persisted B2B carts by company, user, and currency', async () => {
+    const category = await prisma.category.create({ data: { name: 'Cart fixtures', slug: `cart-fixtures-${randomUUID()}` } });
+    const product = await prisma.product.create({ data: { name: 'Cart fixture product', slug: `cart-fixture-${randomUUID()}`, description: 'Cart fixture', priceMinor: 1000, categoryId: category.id } });
+    const variant = await prisma.productVariant.create({ data: { productId: product.id, sku: `CART-${randomUUID().slice(0, 8).toUpperCase()}`, name: product.name, basePriceMinor: 1000, stockQty: 20 } });
+    const company = await prisma.company.create({ data: { name: 'Cart Company', slug: `cart-company-${randomUUID()}` } });
+    const user = await prisma.user.create({ data: { email: `cart-${randomUUID()}@example.com`, passwordHash: 'hash' } });
+    await prisma.companyMembership.create({ data: { companyId: company.id, userId: user.id, role: 'BUYER' } });
+
+    const cart = await prisma.b2bCart.create({ data: { companyId: company.id, userId: user.id, currency: 'USD' } });
+    await prisma.b2bCartLine.create({ data: { cartId: cart.id, variantId: variant.id, quantity: 3 } });
+    await expect(prisma.b2bCartLine.create({ data: { cartId: cart.id, variantId: variant.id, quantity: 2 } })).rejects.toMatchObject({ code: 'P2002' });
+    await expect(prisma.b2bCart.create({ data: { companyId: company.id, userId: user.id, currency: 'USD' } })).rejects.toMatchObject({ code: 'P2002' });
+    await expect(prisma.b2bCart.create({ data: { companyId: company.id, userId: user.id, currency: 'EUR' } })).resolves.toMatchObject({ currency: 'EUR' });
   });
 });

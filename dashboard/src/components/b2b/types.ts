@@ -29,6 +29,7 @@ export type CustomerGroup = {
   id: string;
   name: string;
   code: string;
+  currency?: string;
   isActive: boolean;
   _count?: { companies: number; priceLists: number };
 };
@@ -38,8 +39,9 @@ export type Variant = {
   sku: string;
   name: string;
   options?: string | null;
+  basePriceMinor: number;
+  /** Kept optional for backward-compatible responses from older deployments. */
   priceMinor?: number;
-  basePriceMinor?: number;
   currency: string;
   stockQty: number;
   lowStockThreshold: number;
@@ -51,7 +53,7 @@ export type Variant = {
   product?: { id: string; name: string; slug?: string; imageUrl?: string | null; categoryId?: string | null };
 };
 
-export type PriceTier = { id: string; minQuantity: number; priceMinor: number };
+export type PriceTier = { id: string; minimumQuantity: number; unitPriceMinor: number };
 export type PriceListItem = {
   id: string;
   priceMinor: number;
@@ -98,3 +100,71 @@ export type CatalogResponse = {
   customerGroupId: string | null;
 };
 
+export type B2bCartLine = {
+  lineId: string;
+  variantId: string;
+  sku: string;
+  name: string;
+  currency: string;
+  unitPriceMinor: number;
+  quantity: number;
+  subtotalMinor: number;
+  source: "variant" | "price_list" | "tier";
+  minimumOrderQty: number;
+  packSize: number;
+  quantityIncrement: number;
+  stockQty: number;
+  valid: boolean;
+  validationError: string | null;
+};
+
+export type B2bCart = {
+  id: string | null;
+  companyId: string;
+  currency: string;
+  lines: B2bCartLine[];
+  itemCount: number;
+  subtotalMinor: number;
+  hasInvalidLines: boolean;
+  updatedAt: string | null;
+};
+
+export type CompanyAddress = {
+  id: string;
+  label?: string | null;
+  recipientName: string;
+  phone?: string | null;
+  line1: string;
+  line2?: string | null;
+  city: string;
+  region?: string | null;
+  postalCode: string;
+  countryCode: string;
+  isDefaultShipping: boolean;
+  isDefaultBilling: boolean;
+};
+
+export type B2bPurchaseRequest = {
+  id: string;
+  status: "SUBMITTED" | "APPROVED" | "REJECTED" | "CANCELLED";
+  currency: string;
+  subtotalMinor: number;
+  notes?: string | null;
+  rejectionReason?: string | null;
+  createdAt: string;
+  lines: Array<{ id: string; sku: string; productName: string; quantity: number; subtotalMinor: number }>;
+};
+
+export type B2bOrder = {
+  id: string;
+  number: string;
+  status: "PENDING" | "PROCESSING" | "SHIPPED" | "DELIVERED" | "CANCELLED";
+  paymentStatus: "PENDING_MANUAL";
+  currency: string;
+  subtotalMinor: number;
+  totalMinor: number;
+  createdAt: string;
+  lines: Array<{ id: string; sku: string; productName: string; quantity: number; subtotalMinor: number }>;
+  company?: { id: string; name: string; slug: string };
+  createdBy?: { id: string; name?: string | null; email: string };
+};
