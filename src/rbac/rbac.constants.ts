@@ -12,6 +12,7 @@ export const PermissionKey = {
   ShopCommentsModerate: 'shop:comments:moderate',
   ShopAnalyticsRead: 'shop:analytics:read',
   ShopAuditRead: 'shop:audit:read',
+  ShopB2bManage: 'shop:b2b:manage',
 } as const;
 
 export const RoleKey = { User: 'user', Admin: 'admin' } as const;

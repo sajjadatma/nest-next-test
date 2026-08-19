@@ -19,6 +19,13 @@ describe('PostgreSQL database integration', () => {
   });
 
   beforeEach(async () => {
+    await prisma.priceTier.deleteMany();
+    await prisma.priceListItem.deleteMany();
+    await prisma.priceList.deleteMany();
+    await prisma.productVariant.deleteMany();
+    await prisma.companyMembership.deleteMany();
+    await prisma.company.deleteMany();
+    await prisma.customerGroup.deleteMany();
     await prisma.userPermission.deleteMany();
     await prisma.userRole.deleteMany();
     await prisma.rolePermission.deleteMany();
@@ -59,5 +66,40 @@ describe('PostgreSQL database integration', () => {
     const result = await prisma.user.findUniqueOrThrow({ where: { id: user.id }, include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } }, permissions: { include: { permission: true } } } });
     expect(result.roles[0].role.permissions[0].permission.key).toBe('dashboard:read');
     expect(result.permissions[0].permission.key).toBe('roles:manage');
+  });
+
+  it('enforces B2B identity and pricing uniqueness', async () => {
+    const category = await prisma.category.create({ data: { name: 'B2B fixtures', slug: 'b2b-fixtures' } });
+    const product = await prisma.product.create({
+      data: {
+        name: 'B2B fixture product',
+        slug: 'b2b-fixture-product',
+        description: 'Database fixture',
+        priceMinor: 1250,
+        categoryId: category.id,
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        productId: product.id,
+        sku: 'LEGACY-B2B-FIXTURE',
+        name: product.name,
+        basePriceMinor: product.priceMinor,
+      },
+    });
+    await expect(prisma.productVariant.create({
+      data: { productId: product.id, sku: 'LEGACY-B2B-FIXTURE', name: 'Duplicate', basePriceMinor: 1250 },
+    })).rejects.toMatchObject({ code: 'P2002' });
+
+    const group = await prisma.customerGroup.create({ data: { name: 'Wholesale', code: 'WHOLESALE' } });
+    const company = await prisma.company.create({ data: { name: 'Fixture Company', slug: 'fixture-company', customerGroupId: group.id } });
+    const user = await prisma.user.create({ data: { email: 'b2b-fixture@example.com', passwordHash: 'hash' } });
+    await prisma.companyMembership.create({ data: { companyId: company.id, userId: user.id, role: 'OWNER' } });
+    await expect(prisma.companyMembership.create({ data: { companyId: company.id, userId: user.id, role: 'BUYER' } })).rejects.toMatchObject({ code: 'P2002' });
+
+    const priceList = await prisma.priceList.create({ data: { name: 'Wholesale USD', code: 'WHOLESALE-USD', currency: 'USD', customerGroupId: group.id } });
+    const item = await prisma.priceListItem.create({ data: { priceListId: priceList.id, variantId: variant.id, priceMinor: 1000 } });
+    await prisma.priceTier.create({ data: { priceListItemId: item.id, minimumQuantity: 10, unitPriceMinor: 850 } });
+    await expect(prisma.priceTier.create({ data: { priceListItemId: item.id, minimumQuantity: 10, unitPriceMinor: 800 } })).rejects.toMatchObject({ code: 'P2002' });
   });
 });

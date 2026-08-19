@@ -16,6 +16,7 @@ import { AuditModule } from './audit/audit.module';
 import { SystemLogsModule } from './system-logs/system-logs.module';
 import { ShopModule } from './shop/shop.module';
 import { AccountModule } from './account/account.module';
+import { B2bModule } from './b2b/b2b.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AccountModule } from './account/account.module';
     HealthModule,
     ShopModule,
     AccountModule,
+    B2bModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

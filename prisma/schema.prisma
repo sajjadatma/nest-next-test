@@ -35,6 +35,7 @@ model User {
   payments            Payment[]
   savedPaymentMethods SavedPaymentMethod[]
   deletionRequests    AccountDeletionRequest[]
+  companyMemberships  CompanyMembership[]
 }
 
 model UserProfile {
@@ -161,10 +162,150 @@ model Product {
   favorites          Favorite[]
   comments           ProductComment[]
   inventoryMovements InventoryMovement[]
+  variants           ProductVariant[]
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 
   @@index([categoryId, isActive])
+}
+
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum CompanyMembershipStatus {
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum CompanyMembershipRole {
+  OWNER
+  ADMIN
+  BUYER
+  VIEWER
+}
+
+model Company {
+  id                    String              @id @default(cuid())
+  name                  String
+  slug                  String              @unique
+  legalName             String?
+  taxRegistrationNumber String?
+  status                CompanyStatus       @default(ACTIVE)
+  customerGroupId       String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  customerGroup         CustomerGroup?      @relation(fields: [customerGroupId], references: [id], onDelete: SetNull)
+  memberships           CompanyMembership[]
+
+  @@index([status, updatedAt])
+  @@index([customerGroupId])
+}
+
+model CompanyMembership {
+  id        String                  @id @default(cuid())
+  companyId String
+  userId    String
+  role      CompanyMembershipRole   @default(BUYER)
+  status    CompanyMembershipStatus @default(ACTIVE)
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
+  company   Company                 @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([userId, status])
+  @@index([companyId, status, role])
+}
+
+model CustomerGroup {
+  id          String      @id @default(cuid())
+  name        String
+  code        String      @unique
+  currency    String      @default("USD")
+  description String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  companies   Company[]
+  priceLists  PriceList[]
+
+  @@index([isActive, name])
+}
+
+model ProductVariant {
+  id                String          @id @default(cuid())
+  productId         String
+  sku               String          @unique
+  name              String
+  options           Json?
+  basePriceMinor    Int
+  currency          String          @default("USD")
+  imageUrl          String?
+  stockQty          Int             @default(0)
+  lowStockThreshold Int             @default(5)
+  minimumOrderQty   Int             @default(1)
+  packSize          Int             @default(1)
+  quantityIncrement Int             @default(1)
+  isActive          Boolean         @default(true)
+  position          Int             @default(0)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  priceListItems    PriceListItem[]
+
+  @@index([productId, isActive, position])
+  @@index([isActive, sku])
+}
+
+model PriceList {
+  id              String          @id @default(cuid())
+  customerGroupId String?
+  name            String
+  code            String          @unique @default(cuid())
+  currency        String          @default("USD")
+  priority        Int             @default(0)
+  startsAt        DateTime?
+  endsAt          DateTime?
+  isActive        Boolean         @default(true)
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  customerGroup   CustomerGroup?  @relation(fields: [customerGroupId], references: [id], onDelete: SetNull)
+  items           PriceListItem[]
+
+  @@index([customerGroupId, isActive, priority])
+  @@index([currency, isActive, startsAt, endsAt])
+}
+
+model PriceListItem {
+  id          String         @id @default(cuid())
+  priceListId String
+  variantId   String
+  priceMinor  Int
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  priceList   PriceList      @relation(fields: [priceListId], references: [id], onDelete: Cascade)
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  tiers       PriceTier[]
+
+  @@unique([priceListId, variantId])
+  @@index([variantId])
+}
+
+model PriceTier {
+  id              String        @id @default(cuid())
+  priceListItemId String
+  minimumQuantity Int
+  unitPriceMinor  Int
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  priceListItem   PriceListItem @relation(fields: [priceListItemId], references: [id], onDelete: Cascade)
+
+  @@unique([priceListItemId, minimumQuantity])
+  @@index([priceListItemId, minimumQuantity])
 }
 
 model ProductImage {
