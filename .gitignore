@@ -4,3 +4,7 @@ dist
 *.db
 *.db-journal
 coverage
+test/generated
+playwright-report
+test-results
+tsconfig.build.tsbuildinfo

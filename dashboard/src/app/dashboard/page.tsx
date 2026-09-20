@@ -1,1 +1,3 @@
-import{DashboardClient}from"@/components/dashboard-client";export default function Dashboard(){return <DashboardClient/>}
+import { B2bManagementPage } from "@/components/b2b/b2b-management";
+
+export default function Dashboard() { return <B2bManagementPage section="companies" />; }
