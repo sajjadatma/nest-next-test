@@ -1,5 +1,3 @@
-import { DashboardClient } from "@/components/dashboard-client";
+import { redirect } from "next/navigation";
 
-export default function ShopModerationPage() {
-  return <DashboardClient view="shop" shopSection="moderation" />;
-}
+export default function ShopModerationPage() { redirect("/user-profile/moderation"); }

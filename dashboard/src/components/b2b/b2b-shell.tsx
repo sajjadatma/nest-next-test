@@ -9,14 +9,14 @@ import { useTranslation } from "@/i18n/language-provider";
 type CurrentUser = { id: string; email: string; name?: string | null; permissions?: string[] };
 
 export function B2bState({ title, detail, action }: { title: string; detail: string; action?: ReactNode }) {
-  return <section className="content-card b2b-state" role="status"><span className="eyebrow">B2B workspace</span><h2>{title}</h2><p>{detail}</p>{action}</section>;
+  return <section className="content-card b2b-state" role="status"><span className="eyebrow">Business workspace</span><h2>{title}</h2><p>{detail}</p>{action}</section>;
 }
 
 export function formatB2bMoney(minor: number, currency = "USD") {
   return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(minor / 100);
 }
 
-export function B2bShell({ children, title, eyebrow = "B2B workspace", active }: { children: ReactNode; title: string; eyebrow?: string; active?: string }) {
+export function B2bShell({ children, title, eyebrow = "Business workspace", active }: { children: ReactNode; title: string; eyebrow?: string; active?: string }) {
   const { t } = useTranslation();
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "unauthorized">("loading");
@@ -48,26 +48,26 @@ export function B2bShell({ children, title, eyebrow = "B2B workspace", active }:
   const permissionList = user?.permissions ?? [];
   const canManage = permissionList.includes("shop:manage") || permissionList.includes("shop:b2b:manage");
   const nav = [
-    ["companies", t("Companies"), "/dashboard/shop/b2b/companies"],
-    ["variants", t("Variants"), "/dashboard/shop/b2b/variants"],
-    ["groups", t("Customer groups"), "/dashboard/shop/b2b/customer-groups"],
-    ["lists", t("Price lists"), "/dashboard/shop/b2b/price-lists"],
-    ["orders", t("B2B orders"), "/dashboard/shop/b2b/orders"],
+    ["companies", t("Companies"), "/dashboard/companies"],
+    ["variants", t("Variants"), "/dashboard/variants"],
+    ["groups", t("Customer groups"), "/dashboard/customer-groups"],
+    ["lists", t("Price lists"), "/dashboard/price-lists"],
+    ["orders", t("Business orders"), "/dashboard/orders"],
   ];
   return <>
     <a className="skip-link" href="#b2b-main">{t("Skip to main content")}</a>
     <div className="app-shell b2b-page-shell">
-      <aside className="sidebar" aria-label={t("B2B management navigation")}>
-        <Link href="/dashboard/shop" className="sidebar-brand"><span aria-hidden="true">◼</span><span>{t("Shop management")}</span></Link>
-        <nav className="side-nav" aria-label={t("B2B management navigation")}>
+      <aside className="sidebar" aria-label={t("Dashboard navigation")}>
+        <Link href="/dashboard" className="sidebar-brand"><span aria-hidden="true">◼</span><span>{t("Dashboard")}</span></Link>
+        <nav className="side-nav" aria-label={t("Dashboard navigation")}>
           {nav.map(([id, label, href]) => <Link key={id} href={href} className={`nav-item${active === id ? " active" : ""}`} aria-current={active === id ? "page" : undefined}>{label}</Link>)}
           <Link href="/business" className="nav-item">{t("Buyer portal")}</Link>
         </nav>
         <div className="sidebar-bottom"><span className="eyebrow">{t("Signed in as")}</span><strong>{user?.name || user?.email.split("@")[0]}</strong><small>{user?.email}</small><button className="admin-action" type="button" onClick={() => { void api("/auth/logout", { method: "POST" }).catch(() => undefined); clear(); router.replace("/login"); }}>{t("Sign out")}</button></div>
       </aside>
       <section className="workspace">
-        <header className="workspace-header"><div><p className="eyebrow">{t(eyebrow)}</p><h1>{t(title)}</h1></div><Link className="b2b-header-link" href="/dashboard/shop">{t("Back to shop management")}</Link></header>
-        <main id="b2b-main" className="workspace-content">{!canManage && <B2bState title={t("Management access required")} detail={t("Your account is signed in, but it does not have permission to manage B2B settings.")} />}{canManage && children}</main>
+        <header className="workspace-header"><div><p className="eyebrow">{t(eyebrow)}</p><h1>{t(title)}</h1></div><Link className="b2b-header-link" href="/user-profile">{t("Open user profile")}</Link></header>
+        <main id="b2b-main" className="workspace-content">{!canManage && <B2bState title={t("Management access required")} detail={t("Your account is signed in, but it does not have permission to manage business settings.")} />}{canManage && children}</main>
       </section>
     </div>
     <style jsx global>{`

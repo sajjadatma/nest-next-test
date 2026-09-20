@@ -17,14 +17,14 @@ export function ShopOverviewPanel({ data, orders }: { data: ShopData; orders: Or
       </section>
       <div className="shop-overview-grid">
         <section className="content-card">
-          <div className="section-heading"><div><p className="eyebrow">Attention</p><h2>Inventory watchlist</h2></div><Link className="text-button" href="/dashboard/shop/products">Manage products</Link></div>
+          <div className="section-heading"><div><p className="eyebrow">Attention</p><h2>Inventory watchlist</h2></div><Link className="text-button" href="/user-profile/products">Manage products</Link></div>
           <div className="admin-list overview-list">
             {lowStock.slice(0, 5).map((product) => <div key={product.id}><strong>{product.name}</strong><span>{product.stockQty === 0 ? "Out of stock" : `${product.stockQty} remaining`}</span></div>)}
             {!lowStock.length && <p className="manager-note">All products have healthy stock.</p>}
           </div>
         </section>
         <section className="content-card">
-          <div className="section-heading"><div><p className="eyebrow">Latest activity</p><h2>Recent orders</h2></div><Link className="text-button" href="/dashboard/shop/orders">View all orders</Link></div>
+          <div className="section-heading"><div><p className="eyebrow">Latest activity</p><h2>Recent orders</h2></div><Link className="text-button" href="/user-profile/orders">View all orders</Link></div>
           <div className="admin-list overview-list">
             {orders.items.slice(0, 5).map((order) => <div key={order.id}><strong>{order.number}</strong><span>{order.status} · {money(order.totalMinor)}</span></div>)}
             {!orders.items.length && <p className="manager-note">No orders have arrived yet.</p>}

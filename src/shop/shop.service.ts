@@ -23,6 +23,8 @@ const allowedTransitions: Record<OrderStatus, OrderStatus[]> = {
   CANCELLED: [],
 };
 
+const revenueStatuses = [OrderStatus.CONFIRMED, OrderStatus.PACKING, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.FULFILLED];
+
 @Injectable()
 export class ShopService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService, private readonly notifications: OrderNotificationService) {}
@@ -190,7 +192,7 @@ export class ShopService implements OnModuleInit {
   async adminOverview() {
     const [products, orders, customers, revenue, categories] = await Promise.all([
       this.prisma.product.count(), this.prisma.order.count(), this.prisma.order.groupBy({ by: ['email'] }).then((rows) => rows.length),
-      this.prisma.order.aggregate({ _sum: { totalMinor: true }, where: { status: { in: [OrderStatus.CONFIRMED, OrderStatus.FULFILLED] } } }),
+      this.prisma.order.aggregate({ _sum: { totalMinor: true }, where: { status: { in: revenueStatuses } } }),
       this.prisma.category.findMany({ include: { _count: { select: { products: true, children: true } } }, orderBy: [{ position: 'asc' }, { name: 'asc' }] }),
     ]);
     const catalogue = await this.prisma.product.findMany({ include: { category: true, images: { orderBy: { position: 'asc' } } }, orderBy: { updatedAt: 'desc' } });
@@ -393,7 +395,7 @@ export class ShopService implements OnModuleInit {
     const { from, to } = this.resolveAnalyticsRange(query);
     const createdAt = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
     const where: Prisma.OrderWhereInput = { ...(Object.keys(createdAt).length ? { createdAt } : {}) };
-    const completed = { ...where, status: { in: [OrderStatus.CONFIRMED, OrderStatus.PACKING, OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.FULFILLED] } };
+    const completed = { ...where, status: { in: revenueStatuses } };
     const completedStatuses = completed.status.in;
     const completedStatusSql = Prisma.join(completedStatuses.map((status) => Prisma.sql`${status}::"OrderStatus"`));
     const reportDateFilters: Prisma.Sql[] = [];
@@ -414,7 +416,7 @@ export class ShopService implements OnModuleInit {
     const netSalesMinor = revenue._sum.totalMinor ?? 0;
     const shippingMinor = revenue._sum.shippingMinor ?? 0;
     const discountsMinor = revenue._sum.discountMinor ?? 0;
-    return { range: { from: from?.toISOString() ?? null, to: to?.toISOString() ?? null, key: query.range ?? null }, orders, revenueMinor: netSalesMinor, shippingRevenueMinor: shippingMinor, discountsMinor, lowStock, topProducts, metrics: { grossSalesMinor, discountsMinor, shippingMinor, refundsMinor: 0, netSalesMinor, orders } };
+    return { range: { from: from?.toISOString() ?? null, to: to?.toISOString() ?? null, key: query.range ?? null }, orders, revenueMinor: netSalesMinor, shippingRevenueMinor: shippingMinor, discountsMinor, lowStock, topProducts, metrics: { grossSalesMinor, discountsMinor, shippingMinor, refundsMinor: null, netSalesMinor, orders } };
   }
 
   private resolveAnalyticsRange(query: AnalyticsQueryDto) {

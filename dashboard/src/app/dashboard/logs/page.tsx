@@ -1,3 +1,3 @@
-import { DashboardClient } from "@/components/dashboard-client";
+import { redirect } from "next/navigation";
 
-export default function SystemLogsDashboard() { return <DashboardClient view="logs" />; }
+export default function SystemLogsDashboard() { redirect("/user-profile/logs"); }

@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
+import { PrismaService } from '../../src/prisma/prisma.service';
 
 describe('API integration', () => {
   let app: INestApplication;
@@ -23,17 +24,24 @@ describe('API integration', () => {
     expect(response.body.message).toEqual(expect.any(Array));
   });
 
-  it('registers, authenticates, and exposes a protected dashboard', async () => {
+  it('registers a customer, accepts the access token, and rejects its refresh token as a bearer token', async () => {
     const registration = await request(app.getHttpServer()).post('/api/auth/register').send({ email: 'integration@example.com', password: 'password123', name: 'Integration User' });
     expect(registration.status).toBe(201);
     expect(registration.body.user).toMatchObject({ email: 'integration@example.com', name: 'Integration User' });
     token = registration.body.accessToken;
+    const refreshCookie = registration.headers['set-cookie']?.find((cookie) => cookie.startsWith('refresh_token='));
+    const refreshToken = refreshCookie?.match(/^refresh_token=([^;]+)/)?.[1];
 
-    await expect(request(app.getHttpServer()).get('/api/dashboard')).resolves.toMatchObject({ status: 401 });
-    const dashboard = await request(app.getHttpServer()).get('/api/dashboard').set('Authorization', `Bearer ${token}`);
-    expect(dashboard.status).toBe(200);
-    expect(dashboard.body.metrics[0]).toMatchObject({ label: 'Registered users' });
-    expect(dashboard.body.metrics[0].value).toBeGreaterThanOrEqual(1);
+    expect(refreshToken).toBeTruthy();
+    expect((await request(app.getHttpServer()).get('/api/auth/me').set('Authorization', `Bearer ${token}`)).status).toBe(200);
+    expect((await request(app.getHttpServer()).get('/api/auth/me').set('Authorization', `Bearer ${refreshToken}`)).status).toBe(401);
+    expect((await request(app.getHttpServer()).get('/api/dashboard').set('Authorization', `Bearer ${token}`)).status).toBe(403);
+
+    const prisma = app.get(PrismaService);
+    const staffRole = await prisma.role.findUniqueOrThrow({ where: { key: 'staff' } });
+    await prisma.userRole.create({ data: { userId: registration.body.user.id, roleId: staffRole.id } });
+    expect((await request(app.getHttpServer()).get('/api/dashboard').set('Authorization', `Bearer ${token}`)).status).toBe(200);
+    await prisma.userRole.delete({ where: { userId_roleId: { userId: registration.body.user.id, roleId: staffRole.id } } });
   });
 
   it('handles duplicate registrations, unauthorized login, and forbidden administration', async () => {
@@ -45,7 +53,7 @@ describe('API integration', () => {
   it('updates profile data for the authenticated user', async () => {
     const response = await request(app.getHttpServer()).patch('/api/auth/me').set('Authorization', `Bearer ${token}`).send({ name: 'Updated User' });
     expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ name: 'Updated User', roles: ['user'], permissions: ['dashboard:read'] });
+    expect(response.body).toMatchObject({ name: 'Updated User', roles: ['user'], permissions: [] });
   });
 
   it('throttles repeated authentication attempts', async () => {

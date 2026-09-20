@@ -40,6 +40,7 @@ model User {
   b2bPurchaseRequests B2bPurchaseRequest[] @relation("B2bPurchaseRequester")
   b2bReviewedRequests B2bPurchaseRequest[] @relation("B2bPurchaseReviewer")
   b2bOrders           B2bOrder[]
+  collectedB2bPayments B2bPayment[] @relation("B2bPaymentCollector")
 }
 
 model UserProfile {
@@ -328,9 +329,28 @@ model B2bOrder {
   purchaseRequest   B2bPurchaseRequest @relation(fields: [purchaseRequestId], references: [id], onDelete: Restrict)
   createdBy         User            @relation(fields: [createdById], references: [id], onDelete: Restrict)
   lines             B2bOrderLine[]
+  payment           B2bPayment?
 
   @@index([companyId, status, createdAt])
   @@index([createdById, createdAt])
+}
+
+model B2bPayment {
+  id                String        @id @default(cuid())
+  orderId           String        @unique
+  status            PaymentStatus @default(PENDING)
+  amountMinor       Int
+  currency          String
+  reference         String?
+  collectedById     String?
+  collectedAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  order             B2bOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  collectedBy       User?         @relation("B2bPaymentCollector", fields: [collectedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([collectedById, createdAt])
 }
 
 model B2bOrderLine {

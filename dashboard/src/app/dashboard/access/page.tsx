@@ -1,3 +1,3 @@
-import { DashboardClient } from "@/components/dashboard-client";
+import { redirect } from "next/navigation";
 
-export default function AccessDashboard() { return <DashboardClient view="access" />; }
+export default function AccessDashboard() { redirect("/user-profile/access"); }

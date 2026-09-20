@@ -44,9 +44,11 @@ export class AuthController {
   async logout(@Req() request: Request, @Res({ passthrough: true }) response: Response) { await this.auth.logout(request.cookies?.refresh_token as string | undefined); response.clearCookie('refresh_token', { path: '/api/auth' }); return { message: 'Logged out successfully' }; }
 
   @Post('password-reset/request')
+  @Throttle({ default: { limit: 3, ttl: 60_000 } })
   requestPasswordReset(@Body() dto: RequestPasswordResetDto) { return this.auth.requestPasswordReset(dto.email); }
 
   @Post('password-reset/confirm')
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   resetPassword(@Body() dto: ResetPasswordDto) { return this.auth.resetPassword(dto.token, dto.newPassword); }
 
   @UseGuards(JwtAuthGuard) @Get('me')

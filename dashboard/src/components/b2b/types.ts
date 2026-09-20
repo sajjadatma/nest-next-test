@@ -167,4 +167,5 @@ export type B2bOrder = {
   lines: Array<{ id: string; sku: string; productName: string; quantity: number; subtotalMinor: number }>;
   company?: { id: string; name: string; slug: string };
   createdBy?: { id: string; name?: string | null; email: string };
+  payment?: { id: string; status: "PENDING" | "PAID" | "FAILED" | "CANCELLED" | "REFUNDED"; amountMinor: number; reference?: string | null; collectedAt?: string | null } | null;
 };

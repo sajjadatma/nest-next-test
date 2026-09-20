@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException } from '@nes
 import { B2bService } from './b2b.service';
 
 const prismaStub = () => ({
-  productVariant: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), findMany: vi.fn(), count: vi.fn() },
+  productVariant: { findUnique: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn(), findMany: vi.fn(), count: vi.fn() },
   product: { findUnique: vi.fn() },
   company: { findUnique: vi.fn() },
   companyMembership: { findFirst: vi.fn(), findMany: vi.fn() },
@@ -14,7 +14,9 @@ const prismaStub = () => ({
   b2bCartLine: { findUnique: vi.fn(), create: vi.fn(), upsert: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
   companyAddress: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   b2bPurchaseRequest: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
-  b2bOrder: { findUnique: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn() },
+  b2bOrder: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  b2bOrderLine: { findMany: vi.fn() },
+  b2bPayment: { upsert: vi.fn() },
 });
 
 describe('B2bService', () => {
@@ -172,6 +174,7 @@ describe('B2bService', () => {
     db.company.findUnique.mockResolvedValue({ id: 'c1', status: 'ACTIVE', customerGroup: { currency: 'USD' } });
     db.companyMembership.findFirst.mockResolvedValue({ id: 'm1', status: 'ACTIVE', role: 'BUYER' });
     db.b2bPurchaseRequest.findFirst.mockResolvedValue({ id: 'r1', companyId: 'c1', requesterId: 'u1', status: 'APPROVED', currency: 'USD', shippingAddress: { city: 'Tehran' }, subtotalMinor: 200, lines: [{ variantId: 'v1', sku: 'SKU-1', productName: 'Bulk item', quantity: 2, unitPriceMinor: 100, subtotalMinor: 200, variant: { isActive: true, stockQty: 10 } }] });
+    db.productVariant.updateMany.mockResolvedValue({ count: 1 });
     db.b2bOrder.create.mockResolvedValue({ id: 'o1', number: 'B2B-1', paymentStatus: 'PENDING_MANUAL', totalMinor: 200, lines: [] });
     const service = new B2bService(db as any);
 
@@ -184,5 +187,17 @@ describe('B2bService', () => {
     db.b2bOrder.findUnique.mockResolvedValue({ id: 'o1', status: 'DELIVERED' });
     const service = new B2bService(db as any);
     await expect(service.updateB2bOrderStatus('o1', 'PROCESSING', 'staff-1')).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('does not create a B2B order when an atomic stock reservation loses a race', async () => {
+    const db = prismaStub();
+    db.company.findUnique.mockResolvedValue({ id: 'c1', status: 'ACTIVE', customerGroup: { currency: 'USD' } });
+    db.companyMembership.findFirst.mockResolvedValue({ id: 'm1', status: 'ACTIVE', role: 'BUYER' });
+    db.b2bPurchaseRequest.findFirst.mockResolvedValue({ id: 'r1', companyId: 'c1', requesterId: 'u1', status: 'APPROVED', currency: 'USD', shippingAddress: {}, subtotalMinor: 200, lines: [{ variantId: 'v1', sku: 'SKU-1', productName: 'Bulk item', quantity: 2, unitPriceMinor: 100, subtotalMinor: 200, variant: { isActive: true, stockQty: 2 } }], order: null });
+    db.productVariant.updateMany.mockResolvedValue({ count: 0 });
+    const service = new B2bService(db as any);
+
+    await expect(service.createB2bOrder('c1', 'r1', 'u1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(db.b2bOrder.create).not.toHaveBeenCalled();
   });
 });

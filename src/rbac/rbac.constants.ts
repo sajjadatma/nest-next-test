@@ -15,4 +15,4 @@ export const PermissionKey = {
   ShopB2bManage: 'shop:b2b:manage',
 } as const;
 
-export const RoleKey = { User: 'user', Admin: 'admin' } as const;
+export const RoleKey = { User: 'user', Staff: 'staff', Admin: 'admin' } as const;

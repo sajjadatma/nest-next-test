@@ -2,7 +2,7 @@
 
 A TypeScript NestJS application with a modular API, Prisma persistence, JWT authentication, and a protected browser dashboard.
 
-The project also includes a cash-on-delivery shop at `/shop` and protected commerce operations at `/dashboard/shop`. Checkout uses atomic inventory reservations, idempotency keys, durable confirmation links, customer order history, and audited staff order transitions.
+The project also includes a cash-on-delivery shop at `/shop`, a user-profile workspace at `/user-profile`, and a separate business dashboard at `/dashboard`. Checkout uses atomic inventory reservations, idempotency keys, durable confirmation links, customer order history, and audited staff order transitions.
 
 ## Quick start
 
@@ -21,7 +21,7 @@ Run `npm run dev` from the repository root to start the Nest API at `http://loca
 
 ## API documentation
 
-Production order emails require `RESEND_API_KEY`, `ORDER_EMAIL_FROM`, and `SHOP_PUBLIC_URL`. Verify the sender domain in Resend and use a verified sender such as `NEST <orders@example.com>`. Development can omit these values; orders still receive a durable confirmation page and are marked with `SKIPPED` email status.
+Production order and password-reset emails require `RESEND_API_KEY`, `ORDER_EMAIL_FROM`, and `SHOP_PUBLIC_URL`. Verify the sender domain in Resend and use a verified sender such as `NEST <orders@example.com>`. Development can omit these values; order emails are marked with `SKIPPED` and password-reset requests log that delivery is not configured. Password reset links expire after one hour and are single-use.
 
 With the server running, Swagger UI is available at `http://localhost:5050/api/docs` and the OpenAPI JSON document at `http://localhost:5050/api/docs-json`.
 

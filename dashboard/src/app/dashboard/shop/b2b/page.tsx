@@ -1,5 +1,3 @@
-import { B2bManagementPage } from "@/components/b2b/b2b-management";
+import { redirect } from "next/navigation";
 
-export default function B2bManagementIndex() {
-  return <B2bManagementPage section="companies" />;
-}
+export default function B2bManagementIndex() { redirect("/dashboard"); }

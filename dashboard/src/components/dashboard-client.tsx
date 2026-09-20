@@ -204,11 +204,12 @@ export function DashboardClient({
 
   useEffect(() => {
     let active = true;
+    const loginPath = `/login?redirect=${encodeURIComponent(window.location.pathname)}`;
     void (async () => {
       try {
         if (!token() && !await restoreSession()) {
           clear();
-          if (active) router.replace("/login");
+          if (active) router.replace(loginPath);
           return;
         }
         const account = await api<CurrentUser>("/auth/me");
@@ -257,7 +258,7 @@ export function DashboardClient({
         );
       } catch {
         clear();
-        if (active) router.replace("/login");
+        if (active) router.replace(loginPath);
       }
     })();
     return () => { active = false; };
@@ -349,30 +350,30 @@ export function DashboardClient({
     icon: NavigationIconName;
     hidden?: boolean;
   }[] = [
-    { id: "overview", href: "/dashboard", label: "Overview", icon: "overview" },
+    { id: "overview", href: "/user-profile", label: "User profile", icon: "overview" },
     {
       id: "shop",
-      href: "/dashboard/shop",
-      label: "Shop management",
+      href: "/user-profile",
+      label: "User profile",
       icon: "shop",
       hidden: !canManageShop,
     },
     {
       id: "account",
-      href: "/dashboard/account",
+      href: "/user-profile/account",
       label: "My account",
       icon: "account",
     },
     {
       id: "access",
-      href: "/dashboard/access",
+      href: "/user-profile/access",
       label: "Access control",
       icon: "access",
       hidden: !canManageRoles,
     },
     {
       id: "logs",
-      href: "/dashboard/logs",
+      href: "/user-profile/logs",
       label: "System logs",
       icon: "logs",
       hidden: !canViewLogs,
@@ -492,7 +493,7 @@ export function DashboardClient({
             <p className="eyebrow">Drive workspace</p>
             <h1>
               {view === "overview"
-                ? "B2B management"
+                ? "User profile"
                 : view === "shop"
                   ? "Shop management"
                   : view === "account"

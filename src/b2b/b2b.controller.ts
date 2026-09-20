@@ -6,7 +6,7 @@ import { PermissionsGuard } from '../rbac/permissions.guard';
 import { PermissionKey } from '../rbac/rbac.constants';
 import { RequirePermissions } from '../rbac/require-permissions.decorator';
 import { B2bService } from './b2b.service';
-import { B2bCartQueryDto, B2bPurchaseRequestQueryDto, CatalogQueryDto, CreateB2bPurchaseRequestDto, EffectivePriceQueryDto, ReviewB2bPurchaseRequestDto, SaveB2bCartLineDto, SaveCustomerGroupDto, SavePriceListDto, SavePriceListItemDto, SavePriceTierDto, SaveVariantDto, UpdateB2bOrderStatusDto } from './dto/b2b.dto';
+import { B2bCartQueryDto, B2bPurchaseRequestQueryDto, CatalogQueryDto, CollectB2bPaymentDto, CreateB2bPurchaseRequestDto, EffectivePriceQueryDto, ReviewB2bPurchaseRequestDto, SaveB2bCartLineDto, SaveCustomerGroupDto, SavePriceListDto, SavePriceListItemDto, SavePriceTierDto, SaveVariantDto, UpdateB2bOrderStatusDto } from './dto/b2b.dto';
 import { AddCompanyMemberDto, CreateCompanyDto, SaveCompanyAddressDto, UpdateCompanyDto, UpdateCompanyMemberDto } from './dto/company.dto';
 
 @ApiTags('B2B catalog') @ApiBearerAuth() @UseGuards(JwtAuthGuard)
@@ -71,4 +71,6 @@ export class B2bCompanyManagementController {
   @Delete('companies/:companyId/members/:membershipId') removeMember(@Param('companyId') companyId: string, @Param('membershipId') membershipId: string, @CurrentUser() user: { id: string }) { return this.b2b.removeMember(companyId, membershipId, user.id); }
   @Get('orders') orders() { return this.b2b.listB2bOrdersForStaff(); }
   @Patch('orders/:orderId/status') updateOrderStatus(@Param('orderId') orderId: string, @Body() dto: UpdateB2bOrderStatusDto, @CurrentUser() user: { id: string }) { return this.b2b.updateB2bOrderStatus(orderId, dto.status, user.id); }
+  @RequirePermissions(PermissionKey.ShopOrdersFulfill)
+  @Post('orders/:orderId/payment/collect') collectPayment(@Param('orderId') orderId: string, @Body() dto: CollectB2bPaymentDto, @CurrentUser() user: { id: string }) { return this.b2b.collectB2bPayment(orderId, user.id, dto); }
 }

@@ -9,13 +9,20 @@ import { RbacService } from '../rbac/rbac.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { AuditService } from '../audit/audit.service';
+import { PasswordResetNotificationService } from './password-reset-notification.service';
 
 type UserSession = { id: string; email: string; name: string | null };
 type Session = { accessToken: string; refreshToken: string; user: UserSession };
 
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwt: JwtService, private rbac: RbacService, private audit: AuditService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwt: JwtService,
+    private rbac: RbacService,
+    private audit: AuditService,
+    private passwordResetNotifications: PasswordResetNotificationService,
+  ) {}
 
   async register(dto: RegisterDto) {
     const email = dto.email.trim().toLowerCase();
@@ -86,19 +93,30 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { email: email.trim().toLowerCase() } });
     if (!user) return { message: 'If the account exists, a reset link will be sent.' };
     const token = randomBytes(32).toString('base64url');
-    await this.prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash: this.hash(token), expiresAt: new Date(Date.now() + 60 * 60 * 1000) } });
+    const now = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.passwordResetToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: now } });
+      await tx.passwordResetToken.create({ data: { userId: user.id, tokenHash: this.hash(token), expiresAt: new Date(now.getTime() + 60 * 60 * 1000) } });
+    });
+    await this.passwordResetNotifications.sendPasswordReset(user.email, token);
     await this.audit.record('identity.password_reset_requested', 'user', user.id, user.id);
-    return { message: 'If the account exists, a reset link will be sent.', token: process.env.NODE_ENV === 'development' ? token : undefined };
+    return { message: 'If the account exists, a reset link will be sent.' };
   }
 
   async resetPassword(token: string, newPassword: string) {
-    const reset = await this.prisma.passwordResetToken.findUnique({ where: { tokenHash: this.hash(token) } });
-    if (!reset || reset.usedAt || reset.expiresAt <= new Date()) throw new UnauthorizedException('Reset token is invalid or expired');
-    await this.prisma.$transaction([
-      this.prisma.user.update({ where: { id: reset.userId }, data: { passwordHash: await bcrypt.hash(newPassword, 12) } }),
-      this.prisma.passwordResetToken.update({ where: { id: reset.id }, data: { usedAt: new Date() } }),
-      this.prisma.refreshToken.updateMany({ where: { userId: reset.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-    ]);
+    const now = new Date();
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    const reset = await this.prisma.$transaction(async (tx) => {
+      const consumed = await tx.passwordResetToken.updateMany({
+        where: { tokenHash: this.hash(token), usedAt: null, expiresAt: { gt: now } },
+        data: { usedAt: now },
+      });
+      if (consumed.count !== 1) throw new UnauthorizedException('Reset token is invalid or expired');
+      const usedToken = await tx.passwordResetToken.findUniqueOrThrow({ where: { tokenHash: this.hash(token) }, select: { userId: true } });
+      await tx.user.update({ where: { id: usedToken.userId }, data: { passwordHash } });
+      await tx.refreshToken.updateMany({ where: { userId: usedToken.userId, revokedAt: null }, data: { revokedAt: now } });
+      return usedToken;
+    });
     await this.audit.record('identity.password_reset_completed', 'user', reset.userId, reset.userId);
     return { message: 'Password updated successfully' };
   }

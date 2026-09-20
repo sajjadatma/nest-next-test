@@ -1,5 +1,3 @@
-import { DashboardClient } from "@/components/dashboard-client";
+import { redirect } from "next/navigation";
 
-export default function ShopShippingPage() {
-  return <DashboardClient view="shop" shopSection="shipping" />;
-}
+export default function ShopShippingPage() { redirect("/user-profile/shipping"); }

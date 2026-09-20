@@ -3,16 +3,16 @@ import { ReactNode } from "react";
 import { ShopSection } from "@/components/shop-admin-types";
 
 const links: { id: ShopSection; href: string; label: string; description: string }[] = [
-  { id: "overview", href: "/dashboard/shop", label: "Overview", description: "Store health" },
-  { id: "products", href: "/dashboard/shop/products", label: "Products", description: "Catalogue & stock" },
-  { id: "inventory", href: "/dashboard/shop/inventory", label: "Inventory", description: "Stock control" },
-  { id: "categories", href: "/dashboard/shop/categories", label: "Categories", description: "Collections" },
-  { id: "orders", href: "/dashboard/shop/orders", label: "Orders", description: "Fulfilment" },
-  { id: "shipping", href: "/dashboard/shop/shipping", label: "Shipping", description: "Delivery rules" },
-  { id: "promotions", href: "/dashboard/shop/promotions", label: "Promotions", description: "Discount codes" },
-  { id: "moderation", href: "/dashboard/shop/moderation", label: "Moderation", description: "Customer feedback" },
-  { id: "reports", href: "/dashboard/shop/reports", label: "Reports", description: "Performance" },
-  { id: "audit", href: "/dashboard/shop/audit", label: "Audit", description: "Change history" },
+  { id: "overview", href: "/user-profile", label: "Overview", description: "Store health" },
+  { id: "products", href: "/user-profile/products", label: "Products", description: "Catalogue & stock" },
+  { id: "inventory", href: "/user-profile/inventory", label: "Inventory", description: "Stock control" },
+  { id: "categories", href: "/user-profile/categories", label: "Categories", description: "Collections" },
+  { id: "orders", href: "/user-profile/orders", label: "Orders", description: "Fulfilment" },
+  { id: "shipping", href: "/user-profile/shipping", label: "Shipping", description: "Delivery rules" },
+  { id: "promotions", href: "/user-profile/promotions", label: "Promotions", description: "Discount codes" },
+  { id: "moderation", href: "/user-profile/moderation", label: "Moderation", description: "Customer feedback" },
+  { id: "reports", href: "/user-profile/reports", label: "Reports", description: "Performance" },
+  { id: "audit", href: "/user-profile/audit", label: "Audit", description: "Change history" },
 ];
 
 const sectionPermissions: Partial<Record<ShopSection, string>> = {

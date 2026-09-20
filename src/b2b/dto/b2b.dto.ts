@@ -86,3 +86,7 @@ export class ReviewB2bPurchaseRequestDto {
 export class UpdateB2bOrderStatusDto {
   @IsIn(['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED']) status!: 'PENDING' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 }
+
+export class CollectB2bPaymentDto {
+  @IsOptional() @IsString() @MaxLength(160) reference?: string;
+}

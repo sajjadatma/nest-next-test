@@ -1,5 +1,6 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PermissionKey, RoleKey } from './rbac.constants';
 
@@ -10,6 +11,10 @@ export class RbacService implements OnModuleInit {
   async onModuleInit() { await this.ensureDefaults(); }
 
   async ensureDefaults() {
+    await this.prisma.$transaction((tx) => this.seedDefaults(tx));
+  }
+
+  private async seedDefaults(tx: Prisma.TransactionClient) {
     const definitions = [
       { key: PermissionKey.DashboardRead, name: 'Read dashboard', description: 'View dashboard data' },
       { key: PermissionKey.RolesManage, name: 'Manage roles', description: 'View users and assign roles' },
@@ -26,26 +31,36 @@ export class RbacService implements OnModuleInit {
       { key: PermissionKey.ShopAuditRead, name: 'Read shop audit feed', description: 'View shop change history' },
       { key: PermissionKey.ShopB2bManage, name: 'Manage B2B companies', description: 'Manage B2B companies, memberships, and business access' },
     ];
-    for (const permission of definitions) await this.prisma.permission.upsert({ where: { key: permission.key }, update: { name: permission.name, description: permission.description }, create: permission });
-    const permissions = await this.prisma.permission.findMany({ where: { key: { in: definitions.map(({ key }) => key) } } });
+    await tx.permission.createMany({ data: definitions, skipDuplicates: true });
+    const permissions = await tx.permission.findMany({ where: { key: { in: definitions.map(({ key }) => key) } } });
     const byKey = new Map(permissions.map((permission) => [permission.key, permission.id]));
-    await this.upsertRole(RoleKey.User, 'User', 'Standard application access', [PermissionKey.DashboardRead].map((key) => byKey.get(key)!));
-    await this.upsertRole(RoleKey.Admin, 'Administrator', 'Full application access', permissions.map(({ id }) => id));
-    const userRole = await this.prisma.role.findUniqueOrThrow({ where: { key: RoleKey.User } });
-    const usersWithoutRoles = await this.prisma.user.findMany({ where: { roles: { none: {} } }, select: { id: true } });
-    if (usersWithoutRoles.length) await this.prisma.userRole.createMany({ data: usersWithoutRoles.map(({ id: userId }) => ({ userId, roleId: userRole.id })) });
+    const roleDefinitions = [
+      { key: RoleKey.User, name: 'User', description: 'Standard customer access', permissionKeys: [] as string[] },
+      { key: RoleKey.Staff, name: 'Staff', description: 'Internal dashboard access', permissionKeys: [PermissionKey.DashboardRead] },
+      { key: RoleKey.Admin, name: 'Administrator', description: 'Full application access', permissionKeys: definitions.map(({ key }) => key) },
+    ];
+    for (const definition of roleDefinitions) {
+      const { count: created } = await tx.role.createMany({ data: { key: definition.key, name: definition.name, description: definition.description }, skipDuplicates: true });
+      if (!created) continue;
+      const role = await tx.role.findUniqueOrThrow({ where: { key: definition.key }, select: { id: true } });
+      const permissionIds = definition.permissionKeys.map((key) => byKey.get(key)).filter((id): id is string => Boolean(id));
+      if (permissionIds.length) await tx.rolePermission.createMany({ data: permissionIds.map((permissionId) => ({ roleId: role.id, permissionId })), skipDuplicates: true });
+    }
+    const userRole = await tx.role.findUniqueOrThrow({ where: { key: RoleKey.User } });
+    const usersWithoutRoles = await tx.user.findMany({ where: { roles: { none: {} } }, select: { id: true } });
+    if (usersWithoutRoles.length) await tx.userRole.createMany({ data: usersWithoutRoles.map(({ id: userId }) => ({ userId, roleId: userRole.id })), skipDuplicates: true });
     const adminEmails = (this.config.get<string>('ADMIN_EMAILS') ?? '').split(',').map((email) => email.trim().toLowerCase()).filter(Boolean);
     if (adminEmails.length) {
-      const adminRole = await this.prisma.role.findUniqueOrThrow({ where: { key: RoleKey.Admin } });
-      const admins = await this.prisma.user.findMany({ where: { email: { in: adminEmails } }, select: { id: true } });
-      const existing = await this.prisma.userRole.findMany({ where: { roleId: adminRole.id, userId: { in: admins.map(({ id }) => id) } }, select: { userId: true } });
+      const adminRole = await tx.role.findUniqueOrThrow({ where: { key: RoleKey.Admin } });
+      const admins = await tx.user.findMany({ where: { email: { in: adminEmails } }, select: { id: true } });
+      const existing = await tx.userRole.findMany({ where: { roleId: adminRole.id, userId: { in: admins.map(({ id }) => id) } }, select: { userId: true } });
       const assigned = new Set(existing.map(({ userId }) => userId));
       const missing = admins.filter(({ id }) => !assigned.has(id));
-      if (missing.length) await this.prisma.userRole.createMany({ data: missing.map(({ id: userId }) => ({ userId, roleId: adminRole.id })) });
+      if (missing.length) await tx.userRole.createMany({ data: missing.map(({ id: userId }) => ({ userId, roleId: adminRole.id })), skipDuplicates: true });
     }
   }
 
-  async defaultUserRole() { await this.ensureDefaults(); return this.prisma.role.findUniqueOrThrow({ where: { key: RoleKey.User } }); }
+  async defaultUserRole() { return this.prisma.role.findUniqueOrThrow({ where: { key: RoleKey.User } }); }
 
   async accessForUser(userId: string) {
     const [assignments, directPermissions] = await Promise.all([
@@ -56,11 +71,5 @@ export class RbacService implements OnModuleInit {
       roles: assignments.map(({ role }) => role.key),
       permissions: [...new Set([...assignments.flatMap(({ role }) => role.permissions.map(({ permission }) => permission.key)), ...directPermissions.map(({ permission }) => permission.key)])],
     };
-  }
-
-  private async upsertRole(key: string, name: string, description: string, permissionIds: string[]) {
-    const role = await this.prisma.role.upsert({ where: { key }, update: { name, description }, create: { key, name, description } });
-    await this.prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
-    await this.prisma.rolePermission.createMany({ data: permissionIds.map((permissionId) => ({ roleId: role.id, permissionId })) });
   }
 }

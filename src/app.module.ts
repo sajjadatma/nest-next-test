@@ -18,12 +18,26 @@ import { ShopModule } from './shop/shop.module';
 import { AccountModule } from './account/account.module';
 import { B2bModule } from './b2b/b2b.module';
 
+export const sensitiveLogRedactionPaths: string[] = [
+  'req.headers.authorization',
+  'req.headers.cookie',
+  'req.headers.x-api-key',
+  'req.body.password',
+  'req.body.currentPassword',
+  'req.body.newPassword',
+  'req.body.token',
+  'req.body.refreshToken',
+  'res.headers.authorization',
+  'res.headers.cookie',
+  'res.headers.set-cookie',
+];
+
 @Module({
   imports: [
     AppConfigModule,
     SystemLogsModule,
     AuditModule,
-    LoggerModule.forRoot({ forRoutes: [{ path: '{*path}', method: RequestMethod.ALL }], pinoHttp: { level: process.env.LOG_LEVEL ?? 'info', genReqId: (request, response) => { const requestId = request.headers['x-request-id']?.toString() ?? randomUUID(); response.setHeader('x-request-id', requestId); return requestId; }, redact: ['req.headers.authorization', 'req.headers.cookie'], customProps: (request) => ({ requestId: request.id }) } }),
+    LoggerModule.forRoot({ forRoutes: [{ path: '{*path}', method: RequestMethod.ALL }], pinoHttp: { level: process.env.LOG_LEVEL ?? 'info', genReqId: (request, response) => { const requestId = request.headers['x-request-id']?.toString() ?? randomUUID(); response.setHeader('x-request-id', requestId); return requestId; }, redact: { paths: sensitiveLogRedactionPaths, remove: true }, customProps: (request) => ({ requestId: request.id }) } }),
     ThrottlerModule.forRoot([{ ttl: Number(process.env.RATE_LIMIT_TTL_MS ?? 60_000), limit: Number(process.env.RATE_LIMIT_MAX ?? 100) }]),
     ServeStaticModule.forRoot({ rootPath: join(process.cwd(), 'public'), exclude: ['/api/{*path}'] }),
     PrismaModule,

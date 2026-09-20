@@ -54,9 +54,9 @@ describe('DashboardClient', () => {
     render(<DashboardClient view="overview" />);
     await screen.findByText('Drive workspace');
 
-    expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '/dashboard');
-    expect(screen.getByRole('link', { name: 'My account' })).toHaveAttribute('href', '/dashboard/account');
-    expect(screen.getByRole('heading', { name: 'B2B management' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'User profile' })).toHaveAttribute('href', '/user-profile');
+    expect(screen.getByRole('link', { name: 'My account' })).toHaveAttribute('href', '/user-profile/account');
+    expect(screen.getByRole('heading', { name: 'User profile' })).toBeInTheDocument();
     expect(screen.getByText('No recent team activity.')).toBeInTheDocument();
   });
 

@@ -33,7 +33,7 @@ describe('AuthForm', () => {
     await user.type(screen.getByLabelText('Password'), 'password123');
     await user.click(screen.getByRole('button', { name: 'Create account' }));
 
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/dashboard'));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/shop/account'));
     expect(token()).toBe('token-1');
   });
 
@@ -54,6 +54,6 @@ describe('AuthForm', () => {
     server.use(http.get('http://127.0.0.1:5050/api/auth/me', () => HttpResponse.json({ id: '1', email: 'jane@example.com' })));
     render(<AuthForm mode="login" />);
 
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/dashboard'));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/shop/account'));
   });
 });

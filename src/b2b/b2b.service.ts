@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { B2bCartQueryDto, B2bPurchaseRequestQueryDto, CreateB2bPurchaseRequestDto, ReviewB2bPurchaseRequestDto, SaveB2bCartLineDto, SaveCustomerGroupDto, SavePriceListDto, SavePriceListItemDto, SavePriceTierDto, SaveVariantDto } from './dto/b2b.dto';
+import { B2bCartQueryDto, B2bPurchaseRequestQueryDto, CollectB2bPaymentDto, CreateB2bPurchaseRequestDto, ReviewB2bPurchaseRequestDto, SaveB2bCartLineDto, SaveCustomerGroupDto, SavePriceListDto, SavePriceListItemDto, SavePriceTierDto, SaveVariantDto } from './dto/b2b.dto';
 import { AddCompanyMemberDto, CreateCompanyDto, SaveCompanyAddressDto, UpdateCompanyDto, UpdateCompanyMemberDto } from './dto/company.dto';
 
 type Db = any;
@@ -263,20 +263,28 @@ export class B2bService {
     if (!request) throw new NotFoundException('Purchase request was not found.');
     if (request.status !== 'APPROVED') throw new ConflictException('Only approved purchase requests can become orders.');
     if (request.order) return request.order;
-    for (const line of request.lines) {
-      if (!line.variant.isActive || line.quantity > line.variant.stockQty) throw new BadRequestException(`The requested stock for ${line.sku} is no longer available.`);
-    }
     const number = `B2B-${Date.now().toString(36).toUpperCase()}-${request.id.slice(-6).toUpperCase()}`;
     let order: any;
     try {
-      order = await this.withTransaction(async (db) => db.b2bOrder.create({
+      order = await this.withTransaction(async (db) => {
+        // Conditional updates make the stock check and reservation one operation.
+        // A stale approved request therefore cannot oversell a variant.
+        for (const line of request.lines) {
+          const reserved = await db.productVariant.updateMany({
+            where: { id: line.variantId, isActive: true, stockQty: { gte: line.quantity } },
+            data: { stockQty: { decrement: line.quantity } },
+          });
+          if (reserved.count !== 1) throw new BadRequestException(`The requested stock for ${line.sku} is no longer available.`);
+        }
+        return db.b2bOrder.create({
         data: {
           number, companyId, purchaseRequestId: request.id, createdById: actorId, status: 'PENDING', paymentStatus: 'PENDING_MANUAL', currency: request.currency,
           shippingAddress: request.shippingAddress, subtotalMinor: request.subtotalMinor, shippingMinor: 0, totalMinor: request.subtotalMinor,
           lines: { create: request.lines.map((line: any) => ({ variantId: line.variantId, sku: line.sku, productName: line.productName, quantity: line.quantity, unitPriceMinor: line.unitPriceMinor, subtotalMinor: line.subtotalMinor })) },
         },
         include: { lines: true },
-      }));
+        });
+      });
     } catch (error) {
       if ((error as any)?.code === 'P2002') return this.db.b2bOrder.findUnique({ where: { purchaseRequestId: request.id }, include: { lines: true } });
       throw error;
@@ -288,19 +296,19 @@ export class B2bService {
   async listB2bOrders(companyId: string, userId: string) {
     const { membership } = await this.assertCompanyAccess(companyId, userId);
     const canManage = membership.role === 'OWNER' || membership.role === 'ADMIN';
-    return this.db.b2bOrder.findMany({ where: { companyId, ...(canManage ? {} : { createdById: userId }) }, include: { lines: true, purchaseRequest: { select: { id: true, status: true } }, createdBy: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'desc' } });
+    return this.db.b2bOrder.findMany({ where: { companyId, ...(canManage ? {} : { createdById: userId }) }, include: { lines: true, payment: true, purchaseRequest: { select: { id: true, status: true } }, createdBy: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'desc' } });
   }
 
   async getB2bOrder(companyId: string, orderId: string, userId: string) {
     const { membership } = await this.assertCompanyAccess(companyId, userId);
     const canManage = membership.role === 'OWNER' || membership.role === 'ADMIN';
-    const order = await this.db.b2bOrder.findFirst({ where: { id: orderId, companyId, ...(canManage ? {} : { createdById: userId }) }, include: { lines: true, purchaseRequest: { select: { id: true, status: true } }, createdBy: { select: { id: true, name: true, email: true } } } });
+    const order = await this.db.b2bOrder.findFirst({ where: { id: orderId, companyId, ...(canManage ? {} : { createdById: userId }) }, include: { lines: true, payment: true, purchaseRequest: { select: { id: true, status: true } }, createdBy: { select: { id: true, name: true, email: true } } } });
     if (!order) throw new NotFoundException('B2B order was not found.');
     return order;
   }
 
   async listB2bOrdersForStaff() {
-    return this.db.b2bOrder.findMany({ include: { lines: true, company: { select: { id: true, name: true, slug: true } }, createdBy: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'desc' } });
+    return this.db.b2bOrder.findMany({ include: { lines: true, payment: true, company: { select: { id: true, name: true, slug: true } }, createdBy: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: 'desc' } });
   }
 
   async updateB2bOrderStatus(orderId: string, status: 'PENDING' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED', actorId: string) {
@@ -308,9 +316,34 @@ export class B2bService {
     if (!order) throw new NotFoundException('B2B order was not found.');
     if (order.status === 'CANCELLED' || order.status === 'DELIVERED') throw new ConflictException('A completed B2B order cannot be changed.');
     if (status === 'PENDING' && order.status !== 'PENDING') throw new BadRequestException('B2B orders cannot move back to pending.');
-    const updated = await this.db.b2bOrder.update({ where: { id: orderId }, data: { status }, include: { lines: true } });
+    const allowed: Record<string, string[]> = { PENDING: ['PROCESSING', 'CANCELLED'], PROCESSING: ['SHIPPED', 'CANCELLED'], SHIPPED: ['DELIVERED'], DELIVERED: [], CANCELLED: [] };
+    if (!allowed[order.status]?.includes(status)) throw new ConflictException(`B2B order cannot move from ${order.status} to ${status}.`);
+    const updated = await this.withTransaction(async (db) => {
+      const changed = await db.b2bOrder.updateMany({ where: { id: orderId, status: order.status }, data: { status } });
+      if (changed.count !== 1) throw new ConflictException('B2B order status changed. Refresh and try again.');
+      if (status === 'CANCELLED') {
+        const lines = await db.b2bOrderLine.findMany({ where: { orderId } });
+        for (const line of lines) await db.productVariant.update({ where: { id: line.variantId }, data: { stockQty: { increment: line.quantity } } });
+      }
+      return db.b2bOrder.findUniqueOrThrow({ where: { id: orderId }, include: { lines: true } });
+    });
     await this.recordAudit('b2b.order_status_updated', 'b2b_order', orderId, actorId, { from: order.status, to: status });
     return updated;
+  }
+
+  async collectB2bPayment(orderId: string, actorId: string, dto: CollectB2bPaymentDto) {
+    const payment = await this.withTransaction(async (db) => {
+      const order = await db.b2bOrder.findUnique({ where: { id: orderId }, include: { payment: true } });
+      if (!order) throw new NotFoundException('B2B order was not found.');
+      if (order.payment?.status === 'PAID') return order.payment;
+      return db.b2bPayment.upsert({
+        where: { orderId },
+        update: { status: 'PAID', reference: dto.reference?.trim() || null, collectedById: actorId, collectedAt: new Date() },
+        create: { orderId, status: 'PAID', amountMinor: order.totalMinor, currency: order.currency, reference: dto.reference?.trim() || null, collectedById: actorId, collectedAt: new Date() },
+      });
+    });
+    await this.recordAudit('b2b.payment_collected', 'b2b_payment', payment.id, actorId, { orderId, amountMinor: payment.amountMinor, reference: payment.reference });
+    return payment;
   }
 
   private async effectivePriceForVariant(customerGroupId: string | null | undefined, variant: any, quantity: number, currency: string, enforceQuantity = true) {
